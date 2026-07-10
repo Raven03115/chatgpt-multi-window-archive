@@ -1003,23 +1003,51 @@ function isUpgradeControl(target) {
 }
 
 function isOverlayOnlyControl(target) {
-  const text = getControlText(target);
+  const control = getControlElement(target);
 
-  if (!text) {
+  if (!control) {
     return false;
   }
 
-  const overlayOnlyTokens = [
+  const normalize = (value) =>
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  const exactLabels = new Set([
     "設定",
     "settings",
     "搜尋對話",
+    "搜尋聊天",
     "search chats",
     "search conversations"
-  ];
+  ]);
 
-  return overlayOnlyTokens.some(
-    (token) => text === token ||
-      text.includes(token)
+  const semanticLabels = [
+    control.getAttribute("aria-label"),
+    control.getAttribute("title")
+  ]
+    .map(normalize)
+    .filter(Boolean);
+
+  const exactText = normalize(control.textContent);
+  const testId = normalize(
+    control.getAttribute("data-testid")
+  );
+
+  if (
+    semanticLabels.some((label) =>
+      exactLabels.has(label)
+    ) ||
+    exactLabels.has(exactText)
+  ) {
+    return true;
+  }
+
+  return (
+    /(?:^|[-_])(settings?|preferences?)(?:$|[-_])/.test(testId) ||
+    /(?:^|[-_])search(?:[-_](?:chats?|conversations?))?(?:$|[-_])/.test(testId)
   );
 }
 
@@ -1117,66 +1145,7 @@ function scheduleReportBurst() {
   scheduleReport(400);
 }
 
-let suppressClickAfterBackdropUntil = 0;
-
-function isDialogBackdropPointer(event) {
-  if (!(event?.target instanceof Element)) {
-    return false;
-  }
-
-  let foundVisibleSurface = false;
-
-  for (
-    const root of collectElements(
-      DIALOG_ROOT_SELECTORS
-    )
-  ) {
-    if (!isVisible(root)) {
-      continue;
-    }
-
-    for (
-      const element of
-        getDialogSurfaceCandidates(root)
-    ) {
-      if (!isVisible(element)) {
-        continue;
-      }
-
-      const rect = getRect(element);
-
-      if (
-        !isReasonableDialogSurface(
-          element,
-          rect
-        )
-      ) {
-        continue;
-      }
-
-      foundVisibleSurface = true;
-
-      if (element.contains(event.target)) {
-        return false;
-      }
-    }
-  }
-
-  return foundVisibleSurface;
-}
-
 function handlePointerDown(event) {
-  if (isDialogBackdropPointer(event)) {
-    suppressClickAfterBackdropUntil =
-      Date.now() + 250;
-
-    notifyCloseIntent();
-    notifyFullscreenOverlayIntent(false);
-    scheduleReportBurst();
-
-    return;
-  }
-
   if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
   } else if (
@@ -1198,14 +1167,6 @@ function handlePointerDown(event) {
 }
 
 function handleClick(event) {
-  if (
-    Date.now() <
-      suppressClickAfterBackdropUntil
-  ) {
-    scheduleReportBurst();
-    return;
-  }
-
   if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
   } else if (
@@ -1215,11 +1176,6 @@ function handleClick(event) {
   } else if (
     !interceptExternalRoute(event)
   ) {
-    /*
-     * ChatGPT sometimes resolves a sidebar destination only on click.
-     * Report the route here as well as on pointerdown. The main process
-     * safely de-duplicates pending and current destinations.
-     */
     reportRouteIntent(event.target);
   }
 
