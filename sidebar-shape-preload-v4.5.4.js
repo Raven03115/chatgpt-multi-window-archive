@@ -754,28 +754,30 @@ function isCloseControl(target) {
     return false;
   }
 
-  const text = [
-    control.getAttribute(
-      "aria-label"
-    ),
+  const metadata = [
+    control.getAttribute("aria-label"),
     control.getAttribute("title"),
-    control.getAttribute(
-      "data-testid"
-    ),
-    control.textContent
+    control.getAttribute("data-testid")
   ]
     .filter(Boolean)
     .join(" ")
     .trim()
     .toLowerCase();
 
+  const exactText = String(
+    control.textContent || ""
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
   return (
-    text === "x" ||
-    text === "×" ||
-    text.includes("close") ||
-    text.includes("dismiss") ||
-    text.includes("關閉") ||
-    text.includes("关闭")
+    exactText === "x" ||
+    exactText === "×" ||
+    metadata.includes("close") ||
+    metadata.includes("dismiss") ||
+    metadata.includes("關閉") ||
+    metadata.includes("关闭")
   );
 }
 
@@ -1115,7 +1117,66 @@ function scheduleReportBurst() {
   scheduleReport(400);
 }
 
+let suppressClickAfterBackdropUntil = 0;
+
+function isDialogBackdropPointer(event) {
+  if (!(event?.target instanceof Element)) {
+    return false;
+  }
+
+  let foundVisibleSurface = false;
+
+  for (
+    const root of collectElements(
+      DIALOG_ROOT_SELECTORS
+    )
+  ) {
+    if (!isVisible(root)) {
+      continue;
+    }
+
+    for (
+      const element of
+        getDialogSurfaceCandidates(root)
+    ) {
+      if (!isVisible(element)) {
+        continue;
+      }
+
+      const rect = getRect(element);
+
+      if (
+        !isReasonableDialogSurface(
+          element,
+          rect
+        )
+      ) {
+        continue;
+      }
+
+      foundVisibleSurface = true;
+
+      if (element.contains(event.target)) {
+        return false;
+      }
+    }
+  }
+
+  return foundVisibleSurface;
+}
+
 function handlePointerDown(event) {
+  if (isDialogBackdropPointer(event)) {
+    suppressClickAfterBackdropUntil =
+      Date.now() + 250;
+
+    notifyCloseIntent();
+    notifyFullscreenOverlayIntent(false);
+    scheduleReportBurst();
+
+    return;
+  }
+
   if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
   } else if (
@@ -1137,14 +1198,29 @@ function handlePointerDown(event) {
 }
 
 function handleClick(event) {
+  if (
+    Date.now() <
+      suppressClickAfterBackdropUntil
+  ) {
+    scheduleReportBurst();
+    return;
+  }
+
   if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
   } else if (
     isOverlayOnlyControl(event.target)
   ) {
     notifyOverlayOnlyIntent();
-  } else {
-    interceptExternalRoute(event);
+  } else if (
+    !interceptExternalRoute(event)
+  ) {
+    /*
+     * ChatGPT sometimes resolves a sidebar destination only on click.
+     * Report the route here as well as on pointerdown. The main process
+     * safely de-duplicates pending and current destinations.
+     */
+    reportRouteIntent(event.target);
   }
 
   scheduleReportBurst();

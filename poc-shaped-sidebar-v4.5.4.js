@@ -228,7 +228,7 @@ function loadConfig() {
     };
   } catch (error) {
     console.error(
-      "[Integration v4.5.4] config load failed:",
+      "[Integration v4.5.4.2] config load failed:",
       error.message
     );
 
@@ -258,7 +258,7 @@ function saveConfigNow() {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.5.4] config save failed:",
+      "[Integration v4.5.4.2] config save failed:",
       error.message
     );
   }
@@ -896,7 +896,7 @@ async function installPaneUi(view) {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.5.4] pane UI injection failed:",
+      "[Integration v4.5.4.2] pane UI injection failed:",
       error.message
     );
   }
@@ -989,7 +989,7 @@ function refreshActivePaneVisuals() {
 
         if (isUsableWindow(workspaceWindow)) {
           workspaceWindow.setTitle(
-            `ChatGPT Multi Pane v4.5.4.1 — Active ${targetIndex + 1}/${appConfig.paneCount}`
+            `ChatGPT Multi Pane v4.5.4.2 Beta 3 — Active ${targetIndex + 1}/${appConfig.paneCount}`
           );
         }
       });
@@ -1019,7 +1019,7 @@ function setActivePane(index) {
   activePaneIndex = nextIndex;
 
   console.log(
-    `[Integration v4.5.4] active pane=${activePaneIndex + 1}`
+    `[Integration v4.5.4.2] active pane=${activePaneIndex + 1}`
   );
 
   refreshActivePaneVisuals();
@@ -1160,7 +1160,7 @@ function reloadWebContentsFromCurrentUrl(
       )
       .catch((error) => {
         console.error(
-          `[Integration v4.5.4] ${label} reload failed:`,
+          `[Integration v4.5.4.2] ${label} reload failed:`,
           error.message
         );
       });
@@ -1168,7 +1168,7 @@ function reloadWebContentsFromCurrentUrl(
     return true;
   } catch (error) {
     console.error(
-      `[Integration v4.5.4] ${label} reload failed:`,
+      `[Integration v4.5.4.2] ${label} reload failed:`,
       error.message
     );
 
@@ -1211,7 +1211,7 @@ function refreshActivePaneAndSidebar(
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.5.4.1 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.5.4.2 Beta 3 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
     );
   }
 
@@ -1239,7 +1239,7 @@ function refreshActivePaneAndSidebar(
   }
 
   console.log(
-    "[Integration v4.5.4] refresh requested:",
+    "[Integration v4.5.4.2] refresh requested:",
     {
       source,
       pane: paneIndex + 1,
@@ -1277,7 +1277,7 @@ function loadUrlInActivePane(url) {
   }
 
   console.log(
-    `[Integration v4.5.4] load pane=${paneIndex + 1} url=${url}`
+    `[Integration v4.5.4.2] load pane=${paneIndex + 1} url=${url}`
   );
 
   updatePaneUrl(
@@ -1291,7 +1291,7 @@ function loadUrlInActivePane(url) {
     .loadURL(url)
     .catch((error) => {
       console.error(
-        "[Integration v4.5.4] pane navigation failed:",
+        "[Integration v4.5.4.2] pane navigation failed:",
         error.message
       );
     })
@@ -1312,7 +1312,7 @@ function completeOverlayWorkspaceSelection(url) {
   }
 
   console.log(
-    "[Integration v4.5.4] completing workspace selection:",
+    "[Integration v4.5.4.2] completing workspace selection:",
     url
   );
 
@@ -1348,9 +1348,12 @@ function completeOverlayWorkspaceSelection(url) {
 }
 
 function shouldSuppressSidebarRouteForwarding() {
+  /*
+   * Overlay shape detection can temporarily mistake ordinary ChatGPT
+   * content for a dialog. Only an explicit timed guard may suppress a
+   * workspace route; shape state alone must never block a user click.
+   */
   return (
-    overlayOnlyUiActive ||
-    Boolean(lockedDialogRect) ||
     Date.now() <
       sidebarRouteForwardSuppressionUntil
   );
@@ -1385,7 +1388,7 @@ function handleSidebarNavigation(url) {
    */
   if (shouldSuppressSidebarRouteForwarding()) {
     console.log(
-      "[Integration v4.5.4] suppressed sidebar route:",
+      "[Integration v4.5.4.2] suppressed sidebar route:",
       url
     );
 
@@ -1407,17 +1410,11 @@ function handleSidebarNavigation(url) {
 function setOverlayOnlyUiActive(active) {
   overlayOnlyUiActive = Boolean(active);
 
-  if (overlayOnlyUiActive) {
-    sidebarRouteForwardSuppressionUntil =
-      Date.now() + 5000;
-  } else {
-    /*
-     * Do not leave normal sidebar links blocked for the
-     * remainder of the old five-second overlay guard.
-     */
-    sidebarRouteForwardSuppressionUntil = 0;
-  }
-
+  /*
+   * Do not start a route guard merely because shape detection found a
+   * dialog-like surface. The confirmed close-intent path owns that
+   * guard, preventing false positives from blocking later chat clicks.
+   */
   updatePaneSuppression();
 }
 
@@ -1434,11 +1431,6 @@ function sendFullscreenOverlayClass(enabled) {
 
 function setFullscreenOverlayMode(enabled) {
   fullscreenOverlayMode = Boolean(enabled);
-
-  if (fullscreenOverlayMode) {
-    sidebarRouteForwardSuppressionUntil =
-      Date.now() + 10000;
-  }
 
   sendFullscreenOverlayClass(
     fullscreenOverlayMode
@@ -1525,7 +1517,7 @@ function dismissSidebarTransientUi() {
     });
   } catch (error) {
     console.error(
-      "[Integration v4.5.4] dismiss input failed:",
+      "[Integration v4.5.4.2] dismiss input failed:",
       error.message
     );
   }
@@ -1628,7 +1620,7 @@ function attachPaneEvents(view) {
     } else {
       shell.openExternal(url).catch((error) => {
         console.error(
-          "[Integration v4.5.4] external link failed:",
+          "[Integration v4.5.4.2] external link failed:",
           error.message
         );
       });
@@ -1659,7 +1651,7 @@ function schedulePaneInitialLoad(
       .loadURL(getPaneStartUrl(index))
       .catch((error) => {
         console.error(
-          "[Integration v4.5.4] initial pane load failed:",
+          "[Integration v4.5.4.2] initial pane load failed:",
           error.message
         );
       });
@@ -1821,7 +1813,7 @@ function promoteActivePaneToFirst() {
   renderedActivePaneIndex = null;
 
   console.log(
-    "[Integration v4.5.4] promoted active pane to single-pane slot"
+    "[Integration v4.5.4.2] promoted active pane to single-pane slot"
   );
 }
 
@@ -1906,7 +1898,7 @@ function setPaneCount(targetCount) {
     refreshActivePaneVisuals();
 
     console.log(
-      `[Integration v4.5.4] pane count=${nextCount}`
+      `[Integration v4.5.4.2] pane count=${nextCount}`
     );
   } finally {
     setTimeout(() => {
@@ -2035,7 +2027,7 @@ function sanitizeDialogRect(
     areaRatio >= 0.72
   ) {
     console.log(
-      "[Integration v4.5.4] rejected oversized dialog rect:",
+      "[Integration v4.5.4.2] rejected oversized dialog rect:",
       {
         sanitized,
         widthRatio,
@@ -2100,7 +2092,7 @@ function applyOverlayShape() {
     "function"
   ) {
     console.error(
-      "[Integration v4.5.4] BrowserWindow.setShape unavailable"
+      "[Integration v4.5.4.2] BrowserWindow.setShape unavailable"
     );
 
     return;
@@ -2189,7 +2181,7 @@ function applyOverlayShape() {
       shapeSignature;
   } catch (error) {
     console.error(
-      "[Integration v4.5.4] setShape failed:",
+      "[Integration v4.5.4.2] setShape failed:",
       error.message
     );
   }
@@ -2200,20 +2192,22 @@ function setManualExpanded(expanded) {
   applyOverlayShape();
 }
 
-function unlockDialogShape() {
+function unlockDialogShape(suppressSidebarRoute = false) {
   lockedDialogRect = null;
   overlayOnlyUiActive = false;
 
-  /*
-   * Closing Settings/Search can make the sidebar overlay navigate back
-   * to its own conversation or home route. That navigation is not a
-   * user request to replace the active pane.
-   */
-  sidebarRouteForwardSuppressionUntil =
-    Math.max(
-      sidebarRouteForwardSuppressionUntil,
-      Date.now() + 1500
-    );
+  if (suppressSidebarRoute) {
+    /*
+     * Only a confirmed Settings/Search close action should block the
+     * overlay page's follow-up route. Normal sidebar clicks must not
+     * create this guard.
+     */
+    sidebarRouteForwardSuppressionUntil =
+      Math.max(
+        sidebarRouteForwardSuppressionUntil,
+        Date.now() + 1500
+      );
+  }
 
   suppressDialogLockUntil =
     Date.now() +
@@ -2225,7 +2219,7 @@ function unlockDialogShape() {
   applyOverlayShape();
 
   console.log(
-    "[Integration v4.5.4] dialog shape unlocked"
+    "[Integration v4.5.4.2] dialog shape unlocked"
   );
 }
 
@@ -2374,7 +2368,7 @@ function createSidebarOverlayWindow() {
           );
       } catch (error) {
         console.error(
-          "[Integration v4.5.4] transparency CSS failed:",
+          "[Integration v4.5.4.2] transparency CSS failed:",
           error.message
         );
       }
@@ -2389,7 +2383,7 @@ function createSidebarOverlayWindow() {
       sidebarInitialLoadComplete = true;
 
       console.log(
-        "[Integration v4.5.4] ChatGPT sidebar overlay loaded"
+        "[Integration v4.5.4.2] ChatGPT sidebar overlay loaded"
       );
     }
   );
@@ -2426,7 +2420,7 @@ function createSidebarOverlayWindow() {
       } else if (!isChatGPTUrl(url)) {
         shell.openExternal(url).catch((error) => {
           console.error(
-            "[Integration v4.5.4] sidebar external link failed:",
+            "[Integration v4.5.4.2] sidebar external link failed:",
             error.message
           );
         });
@@ -2442,7 +2436,7 @@ function createSidebarOverlayWindow() {
     "render-process-gone",
     (_event, details) => {
       console.error(
-        "[Integration v4.5.4] sidebar renderer stopped:",
+        "[Integration v4.5.4.2] sidebar renderer stopped:",
         details
       );
     }
@@ -2466,7 +2460,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.5.4.1 — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.5.4.2 Beta 3 — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {
@@ -2560,12 +2554,12 @@ function registerShortcut(
       );
 
     console.log(
-      `[Integration v4.5.4] shortcut ${label}: ` +
+      `[Integration v4.5.4.2] shortcut ${label}: ` +
       `${accelerator}, registered=${registered}`
     );
   } catch (error) {
     console.error(
-      `[Integration v4.5.4] shortcut ${label} failed:`,
+      `[Integration v4.5.4.2] shortcut ${label} failed:`,
       error.message
     );
   }
@@ -2713,7 +2707,7 @@ ipcMain.on(
       }
 
       console.log(
-        "[Integration v4.5.4] dialog shape locked:",
+        "[Integration v4.5.4.2] dialog shape locked:",
         lockedDialogRect
       );
     }
@@ -2738,7 +2732,20 @@ ipcMain.on(
       return;
     }
 
-    unlockDialogShape();
+    const hadOverlayDialog =
+      overlayOnlyUiActive ||
+      Boolean(lockedDialogRect) ||
+      fullscreenOverlayMode;
+
+    if (!hadOverlayDialog) {
+      console.log(
+        "[Integration v4.5.4.2] ignored stray dialog close intent"
+      );
+
+      return;
+    }
+
+    unlockDialogShape(true);
 
     if (fullscreenOverlayMode) {
       setTimeout(() => {
@@ -2778,7 +2785,7 @@ ipcMain.on(
 
     if (shouldSuppressSidebarRouteForwarding()) {
       console.log(
-        "[Integration v4.5.4] suppressed sidebar route intent:",
+        "[Integration v4.5.4.2] suppressed sidebar route intent:",
         url
       );
     }
@@ -2851,17 +2858,17 @@ app.whenReady().then(() => {
   appConfig = loadConfig();
 
   console.log(
-    "[Integration v4.5.4] Electron:",
+    "[Integration v4.5.4.2] Electron:",
     process.versions.electron
   );
 
   console.log(
-    "[Integration v4.5.4] userData:",
+    "[Integration v4.5.4.2] userData:",
     app.getPath("userData")
   );
 
   console.log(
-    "[Integration v4.5.4] restored pane count:",
+    "[Integration v4.5.4.2] restored pane count:",
     appConfig.paneCount
   );
 
