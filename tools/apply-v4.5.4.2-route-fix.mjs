@@ -6,6 +6,7 @@ const root = process.cwd();
 const expectedBranch = "fix/sidebar-route-regression-v4.5.4.2";
 const coreFile = "poc-shaped-sidebar-v4.5.4.js";
 const preloadFile = "sidebar-shape-preload-v4.5.4.js";
+const packageVersion = "4.5.4-routefix.2";
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -77,7 +78,7 @@ const trackedStatus = run("git", [
 ]);
 
 if (trackedStatus) {
-  fail("目前有已追蹤檔案尚未提交，停止以避免覆蓋其他修改。\n" + trackedStatus);
+  fail("目前有已追蹤檔案尚未提交。請先執行 git restore . 再重跑。\n" + trackedStatus);
 }
 
 const expectedCoreBlob = "d29d51ec91ea8406617120117f0506e4ba564a94";
@@ -131,16 +132,100 @@ core = replaceOnce(
   "關閉設定時的路由保護"
 );
 
+core = replaceOnce(
+  core,
+`function shouldSuppressSidebarRouteForwarding() {
+  return (
+    overlayOnlyUiActive ||
+    Boolean(lockedDialogRect) ||
+    Date.now() <
+      sidebarRouteForwardSuppressionUntil
+  );
+}
+`,
+`function shouldSuppressSidebarRouteForwarding() {
+  /*
+   * Overlay shape detection can temporarily mistake ordinary ChatGPT
+   * content for a dialog. Only an explicit timed guard may suppress a
+   * workspace route; shape state alone must never block a user click.
+   */
+  return (
+    Date.now() <
+      sidebarRouteForwardSuppressionUntil
+  );
+}
+`,
+  "只讓明確計時保護阻擋路由"
+);
+
+core = replaceOnce(
+  core,
+`function setOverlayOnlyUiActive(active) {
+  overlayOnlyUiActive = Boolean(active);
+
+  if (overlayOnlyUiActive) {
+    sidebarRouteForwardSuppressionUntil =
+      Date.now() + 5000;
+  } else {
+    /*
+     * Do not leave normal sidebar links blocked for the
+     * remainder of the old five-second overlay guard.
+     */
+    sidebarRouteForwardSuppressionUntil = 0;
+  }
+
+  updatePaneSuppression();
+}
+`,
+`function setOverlayOnlyUiActive(active) {
+  overlayOnlyUiActive = Boolean(active);
+
+  /*
+   * Do not start a route guard merely because shape detection found a
+   * dialog-like surface. The confirmed close-intent path owns that
+   * guard, preventing false positives from blocking later chat clicks.
+   */
+  updatePaneSuppression();
+}
+`,
+  "移除 overlay 啟用時的五秒路由阻擋"
+);
+
+core = replaceOnce(
+  core,
+`function setFullscreenOverlayMode(enabled) {
+  fullscreenOverlayMode = Boolean(enabled);
+
+  if (fullscreenOverlayMode) {
+    sidebarRouteForwardSuppressionUntil =
+      Date.now() + 10000;
+  }
+
+  sendFullscreenOverlayClass(
+`,
+`function setFullscreenOverlayMode(enabled) {
+  fullscreenOverlayMode = Boolean(enabled);
+
+  sendFullscreenOverlayClass(
+`,
+  "移除全畫面模式的通用路由阻擋"
+);
+
 core = replaceRegexOnce(
   core,
   /(ipcMain\.on\(\n  "chatgpt-sidebar-dialog-close-intent",[\s\S]*?)(    unlockDialogShape\(\);\n\n    if \(fullscreenOverlayMode\) \{)/g,
-  `$1    const hadOverlayDialog =\n      overlayOnlyUiActive ||\n      Boolean(lockedDialogRect) ||\n      fullscreenOverlayMode;\n\n    if (!hadOverlayDialog) {\n      console.log(\n        "[Integration v4.5.4] ignored stray dialog close intent"\n      );\n\n      return;\n    }\n\n    unlockDialogShape(true);\n\n    if (fullscreenOverlayMode) {`,
+  `$1    const hadOverlayDialog =\n      overlayOnlyUiActive ||\n      Boolean(lockedDialogRect) ||\n      fullscreenOverlayMode;\n\n    if (!hadOverlayDialog) {\n      console.log(\n        "[Integration v4.5.4.2] ignored stray dialog close intent"\n      );\n\n      return;\n    }\n\n    unlockDialogShape(true);\n\n    if (fullscreenOverlayMode) {`,
   "只允許真實對話框關閉事件啟動路由保護"
 );
 
 core = core.replaceAll(
+  "[Integration v4.5.4]",
+  "[Integration v4.5.4.2]"
+);
+
+core = core.replaceAll(
   "ChatGPT Multi Pane v4.5.4.1 —",
-  "ChatGPT Multi Pane v4.5.4.2 Beta —"
+  "ChatGPT Multi Pane v4.5.4.2 Beta 2 —"
 );
 
 write(coreFile, core);
@@ -204,9 +289,9 @@ preload = replaceOnce(
     !interceptExternalRoute(event)
   ) {
     /*
-     * ChatGPT sometimes completes sidebar navigation only on click,
-     * rather than pointerdown. Report the route again here; the main
-     * process de-duplicates pending and current destinations.
+     * ChatGPT sometimes resolves a sidebar destination only on click.
+     * Report the route here as well as on pointerdown. The main process
+     * safely de-duplicates pending and current destinations.
      */
     reportRouteIntent(event.target);
   }
@@ -220,27 +305,33 @@ let main = read("main.js");
 main = replaceOnce(
   main,
   "[Bootstrap v4.5.4.1]",
-  "[Bootstrap v4.5.4.2 Beta]",
+  "[Bootstrap v4.5.4.2 Beta 2]",
   "Bootstrap 測試版標籤"
 );
 write("main.js", main);
 
-const packagePath = path.join(root, "package.json");
 const packageJson = JSON.parse(read("package.json"));
 
 if (packageJson.version !== "4.5.4+hotfix.1") {
   fail(`package.json 版本不是 4.5.4+hotfix.1，而是 ${packageJson.version}`);
 }
 
-packageJson.version = "4.5.4-routefix.1";
+packageJson.version = packageVersion;
 write("package.json", JSON.stringify(packageJson, null, 2));
 
-console.log("更新 package-lock.json...");
-execFileSync("npm.cmd", ["install", "--package-lock-only"], {
-  cwd: root,
-  stdio: "inherit",
-  shell: false
-});
+const packageLock = JSON.parse(read("package-lock.json"));
+
+if (packageLock.version !== "4.5.4+hotfix.1") {
+  fail(`package-lock.json 頂層版本不是 4.5.4+hotfix.1，而是 ${packageLock.version}`);
+}
+
+if (packageLock.packages?.[""]?.version !== "4.5.4+hotfix.1") {
+  fail(`package-lock.json 根套件版本不是 4.5.4+hotfix.1，而是 ${packageLock.packages?.[""]?.version}`);
+}
+
+packageLock.version = packageVersion;
+packageLock.packages[""].version = packageVersion;
+write("package-lock.json", JSON.stringify(packageLock, null, 2));
 
 for (const file of [
   "main.js",
@@ -248,7 +339,7 @@ for (const file of [
   preloadFile,
   "pane-chrome-preload-v4.5.4.js"
 ]) {
-  execFileSync("node", ["--check", file], {
+  execFileSync(process.execPath, ["--check", file], {
     cwd: root,
     stdio: "inherit",
     shell: false
@@ -261,8 +352,8 @@ execFileSync("git", ["diff", "--check"], {
   shell: false
 });
 
-console.log("\n完成 v4.5.4.2 Beta 路由修正與語法驗證。");
+console.log("\n完成 v4.5.4.2 Beta 2 路由修正與語法驗證。");
 console.log("尚未 commit，也尚未 push。");
 console.log("\n下一步：");
 console.log("  npm start");
-console.log("\n請測試一般對話、新對話，以及設定視窗關閉後是否保持原對話。");
+console.log("\n請連續切換至少 5 次一般對話與 Project 對話，再測試設定視窗關閉。");
