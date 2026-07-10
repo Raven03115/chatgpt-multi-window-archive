@@ -5,16 +5,6 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "poc": "electron poc-shaped-sidebar.js",
-    "poc2": "electron poc-shaped-sidebar-v2.js",
-    "poc3": "electron poc-shaped-sidebar-v3.js",
-    "poc31": "electron poc-shaped-sidebar-v3.1.js",
-    "poc32": "electron poc-shaped-sidebar-v3.2.js",
-    "poc4": "electron poc-shaped-sidebar-v4.js",
-    "poc41": "electron poc-shaped-sidebar-v4.1.js",
-    "poc42": "electron poc-shaped-sidebar-v4.2.js",
-    "poc43": "electron poc-shaped-sidebar-v4.3.js",
-    "poc44": "electron poc-shaped-sidebar-v4.4.js",
     "poc441": "electron poc-shaped-sidebar-v4.4.1.js",
     "poc451": "electron poc-shaped-sidebar-v4.5.1.js"
   },
