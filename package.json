@@ -4,9 +4,11 @@
   "description": "Personal ChatGPT multi-window desktop wrapper",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "poc": "electron poc-shaped-sidebar.js",
+    "poc2": "electron poc-shaped-sidebar-v2.js"
   },
   "devDependencies": {
-    "electron": "^latest"
+    "electron": "43.1.0"
   }
 }
