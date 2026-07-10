@@ -1,9 +1,9 @@
-﻿{
+{
   "name": "chatgpt-multi-window",
   "version": "4.5.1",
   "private": true,
-  "description": "Official ChatGPT multi-pane desktop workspace",
-  "main": "poc-shaped-sidebar-v4.5.1.js",
+  "description": "Unofficial Windows multi-pane workspace for the official ChatGPT website",
+  "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
