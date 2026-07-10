@@ -1,525 +1,2029 @@
-const { app, BrowserWindow, ipcMain, screen, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  screen,
+  shell
+} = require("electron");
+
 const fs = require("fs");
 const path = require("path");
 
 const CHATGPT_URL = "https://chatgpt.com";
 const PARTITION = "persist:chatgpt-shared";
+
 const MAX_PANES = 6;
-const MIN_W = 380;
-const MIN_H = 480;
-const TOOLBAR_W = 820;
-const TOOLBAR_H = 188;
+
+const FLOATING_MIN_WIDTH = 380;
+const FLOATING_MIN_HEIGHT = 480;
+const TILED_MIN_WIDTH = 280;
+const TILED_MIN_HEIGHT = 300;
+
+const TOOLBAR_WIDTH = 1060;
+const TOOLBAR_HEIGHT = 230;
 const GAP = 8;
 
-app.setPath("userData", path.join(app.getPath("appData"), "chatgpt-multi-window"));
-const CONFIG_PATH = path.join(app.getPath("userData"), "floating-workspace-v5.json");
+app.setPath(
+  "userData",
+  path.join(
+    app.getPath("appData"),
+    "chatgpt-multi-window"
+  )
+);
+
+const CONFIG_PATH = path.join(
+  app.getPath("userData"),
+  "floating-workspace-v5.json"
+);
 
 let controller = null;
 const panes = new Map();
+
 let quitting = false;
 let applyingLayout = false;
 let saveTimer = null;
 
+function defaultTiledLayouts() {
+  return {
+    "1": {},
+    "2": {
+      x1: 0.5
+    },
+    "3": {
+      x1: 1 / 3,
+      x2: 2 / 3
+    },
+    "4": {
+      x1: 0.5,
+      y1: 0.5
+    },
+    "5": {
+      y1: 0.5,
+      topX1: 1 / 3,
+      topX2: 2 / 3,
+      bottomX1: 0.5
+    },
+    "6": {
+      x1: 1 / 3,
+      x2: 2 / 3,
+      y1: 0.5
+    }
+  };
+}
+
 function defaultState() {
   return {
+    version: 2,
     paneCount: 2,
     layoutMode: "floating",
     layoutLocked: false,
     activePaneId: 1,
-    panes: Array.from({ length: MAX_PANES }, (_, i) => ({
-      id: i + 1,
-      visible: i < 2,
-      url: CHATGPT_URL,
-      bounds: null
-    }))
+    tiledLayouts: defaultTiledLayouts(),
+    panes: Array.from(
+      { length: MAX_PANES },
+      (_unused, index) => ({
+        id: index + 1,
+        visible: index < 2,
+        url: CHATGPT_URL,
+        floatingBounds: null
+      })
+    )
   };
 }
 
 let state = defaultState();
 
-function clamp(n, min, max, fallback) {
-  n = Number(n);
-  return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.floor(n))) : fallback;
+function clamp(
+  value,
+  minimum,
+  maximum,
+  fallback
+) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return Math.max(
+    minimum,
+    Math.min(
+      maximum,
+      number
+    )
+  );
+}
+
+function clampInteger(
+  value,
+  minimum,
+  maximum,
+  fallback
+) {
+  return Math.floor(
+    clamp(
+      value,
+      minimum,
+      maximum,
+      fallback
+    )
+  );
 }
 
 function validChatGPTUrl(url) {
   try {
-    const u = new URL(String(url));
-    return u.protocol === "https:" && u.hostname === "chatgpt.com";
+    const parsed = new URL(
+      String(url)
+    );
+
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname ===
+        "chatgpt.com"
+    );
   } catch {
     return false;
   }
 }
 
-function normalizeBounds(bounds) {
-  if (!bounds || typeof bounds !== "object") return null;
+function normalizeFloatingBounds(
+  bounds
+) {
+  if (
+    !bounds ||
+    typeof bounds !== "object"
+  ) {
+    return null;
+  }
+
   const probe = {
     x: Number(bounds.x) || 0,
     y: Number(bounds.y) || 0,
-    width: Math.max(1, Number(bounds.width) || 1),
-    height: Math.max(1, Number(bounds.height) || 1)
+    width: Math.max(
+      1,
+      Number(bounds.width) || 1
+    ),
+    height: Math.max(
+      1,
+      Number(bounds.height) || 1
+    )
   };
-  const area = screen.getDisplayMatching(probe).workArea;
-  const width = clamp(bounds.width, MIN_W, Math.max(MIN_W, area.width), 720);
-  const height = clamp(bounds.height, MIN_H, Math.max(MIN_H, area.height), 760);
-  const x = clamp(bounds.x, area.x - width + 80, area.x + area.width - 80, area.x + 24);
-  const y = clamp(bounds.y, area.y, area.y + area.height - 80, area.y + 90);
-  return { x, y, width, height };
+
+  const area =
+    screen.getDisplayMatching(
+      probe
+    ).workArea;
+
+  const width = clampInteger(
+    bounds.width,
+    FLOATING_MIN_WIDTH,
+    Math.max(
+      FLOATING_MIN_WIDTH,
+      area.width
+    ),
+    720
+  );
+
+  const height = clampInteger(
+    bounds.height,
+    FLOATING_MIN_HEIGHT,
+    Math.max(
+      FLOATING_MIN_HEIGHT,
+      area.height
+    ),
+    760
+  );
+
+  const x = clampInteger(
+    bounds.x,
+    area.x - width + 80,
+    area.x + area.width - 80,
+    area.x + 24
+  );
+
+  const y = clampInteger(
+    bounds.y,
+    area.y,
+    area.y + area.height - 80,
+    area.y + 90
+  );
+
+  return {
+    x,
+    y,
+    width,
+    height
+  };
+}
+
+function normalizeRatio(
+  value,
+  fallback
+) {
+  return clamp(
+    value,
+    0.05,
+    0.95,
+    fallback
+  );
+}
+
+function normalizeStoredTiledLayout(
+  count,
+  raw
+) {
+  const defaults =
+    defaultTiledLayouts()[
+      String(count)
+    ];
+
+  const input =
+    raw &&
+    typeof raw === "object"
+      ? raw
+      : {};
+
+  if (count === 1) {
+    return {};
+  }
+
+  if (count === 2) {
+    return {
+      x1: normalizeRatio(
+        input.x1,
+        defaults.x1
+      )
+    };
+  }
+
+  if (count === 3) {
+    return {
+      x1: normalizeRatio(
+        input.x1,
+        defaults.x1
+      ),
+      x2: normalizeRatio(
+        input.x2,
+        defaults.x2
+      )
+    };
+  }
+
+  if (count === 4) {
+    return {
+      x1: normalizeRatio(
+        input.x1,
+        defaults.x1
+      ),
+      y1: normalizeRatio(
+        input.y1,
+        defaults.y1
+      )
+    };
+  }
+
+  if (count === 5) {
+    return {
+      y1: normalizeRatio(
+        input.y1,
+        defaults.y1
+      ),
+      topX1: normalizeRatio(
+        input.topX1,
+        defaults.topX1
+      ),
+      topX2: normalizeRatio(
+        input.topX2,
+        defaults.topX2
+      ),
+      bottomX1: normalizeRatio(
+        input.bottomX1,
+        defaults.bottomX1
+      )
+    };
+  }
+
+  return {
+    x1: normalizeRatio(
+      input.x1,
+      defaults.x1
+    ),
+    x2: normalizeRatio(
+      input.x2,
+      defaults.x2
+    ),
+    y1: normalizeRatio(
+      input.y1,
+      defaults.y1
+    )
+  };
 }
 
 function normalizeState(raw) {
   const next = defaultState();
-  if (!raw || typeof raw !== "object") return next;
 
-  next.paneCount = clamp(raw.paneCount, 1, MAX_PANES, 2);
-  next.layoutMode = raw.layoutMode === "tiled" ? "tiled" : "floating";
-  next.layoutLocked = Boolean(raw.layoutLocked);
-  next.activePaneId = clamp(raw.activePaneId, 1, next.paneCount, 1);
+  if (
+    !raw ||
+    typeof raw !== "object"
+  ) {
+    return next;
+  }
 
-  const input = Array.isArray(raw.panes) ? raw.panes : [];
-  next.panes = Array.from({ length: MAX_PANES }, (_, i) => {
-    const id = i + 1;
-    const old = input.find((x) => Number(x?.id) === id) || {};
-    return {
-      id,
-      visible: id <= next.paneCount ? old.visible !== false : false,
-      url: validChatGPTUrl(old.url) ? old.url : CHATGPT_URL,
-      bounds: normalizeBounds(old.bounds)
-    };
-  });
+  next.paneCount =
+    clampInteger(
+      raw.paneCount,
+      1,
+      MAX_PANES,
+      2
+    );
+
+  next.layoutMode =
+    raw.layoutMode === "tiled"
+      ? "tiled"
+      : "floating";
+
+  next.layoutLocked =
+    Boolean(raw.layoutLocked);
+
+  next.activePaneId =
+    clampInteger(
+      raw.activePaneId,
+      1,
+      next.paneCount,
+      1
+    );
+
+  const rawTiledLayouts =
+    raw.tiledLayouts &&
+    typeof raw.tiledLayouts ===
+      "object"
+      ? raw.tiledLayouts
+      : {};
+
+  next.tiledLayouts =
+    Object.fromEntries(
+      Array.from(
+        { length: MAX_PANES },
+        (_unused, index) => {
+          const count = index + 1;
+
+          return [
+            String(count),
+            normalizeStoredTiledLayout(
+              count,
+              rawTiledLayouts[
+                String(count)
+              ]
+            )
+          ];
+        }
+      )
+    );
+
+  const input =
+    Array.isArray(raw.panes)
+      ? raw.panes
+      : [];
+
+  next.panes = Array.from(
+    { length: MAX_PANES },
+    (_unused, index) => {
+      const id = index + 1;
+
+      const old =
+        input.find(
+          (candidate) =>
+            Number(
+              candidate?.id
+            ) === id
+        ) || {};
+
+      /*
+       * v5.0-A used "bounds".
+       * Migrate it into the new
+       * floating-only bounds field.
+       */
+      const legacyBounds =
+        old.floatingBounds ||
+        old.bounds;
+
+      return {
+        id,
+        visible:
+          id <= next.paneCount
+            ? old.visible !== false
+            : false,
+        url: validChatGPTUrl(
+          old.url
+        )
+          ? old.url
+          : CHATGPT_URL,
+        floatingBounds:
+          normalizeFloatingBounds(
+            legacyBounds
+          )
+      };
+    }
+  );
+
   return next;
 }
 
 function loadState() {
   try {
-    if (!fs.existsSync(CONFIG_PATH)) return defaultState();
-    return normalizeState(JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")));
+    if (
+      !fs.existsSync(
+        CONFIG_PATH
+      )
+    ) {
+      return defaultState();
+    }
+
+    return normalizeState(
+      JSON.parse(
+        fs.readFileSync(
+          CONFIG_PATH,
+          "utf8"
+        )
+      )
+    );
   } catch (error) {
-    console.error("[v5.0-A] config load failed:", error.message);
+    console.error(
+      "[v5.0-B] config load failed:",
+      error.message
+    );
+
     return defaultState();
   }
 }
 
 function saveNow() {
   try {
-    fs.mkdirSync(app.getPath("userData"), { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(state, null, 2), "utf8");
+    fs.mkdirSync(
+      app.getPath("userData"),
+      { recursive: true }
+    );
+
+    fs.writeFileSync(
+      CONFIG_PATH,
+      JSON.stringify(
+        state,
+        null,
+        2
+      ),
+      "utf8"
+    );
   } catch (error) {
-    console.error("[v5.0-A] config save failed:", error.message);
+    console.error(
+      "[v5.0-B] config save failed:",
+      error.message
+    );
   }
 }
 
 function saveSoon() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveNow, 250);
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+  }
+
+  saveTimer = setTimeout(
+    () => {
+      saveTimer = null;
+      saveNow();
+    },
+    250
+  );
 }
 
 function paneState(id) {
-  return state.panes.find((p) => p.id === id);
+  return state.panes.find(
+    (pane) =>
+      pane.id === id
+  );
 }
 
-function usable(win) {
-  return Boolean(win && !win.isDestroyed());
+function usable(window) {
+  return Boolean(
+    window &&
+    !window.isDestroyed()
+  );
+}
+
+function currentTiledLayout() {
+  return state.tiledLayouts[
+    String(state.paneCount)
+  ];
+}
+
+function effectiveLocked() {
+  return (
+    state.layoutMode === "tiled" ||
+    state.layoutLocked
+  );
 }
 
 function publicState() {
   return {
+    version: state.version,
     paneCount: state.paneCount,
     layoutMode: state.layoutMode,
-    layoutLocked: state.layoutLocked,
-    activePaneId: state.activePaneId,
+    layoutLocked:
+      state.layoutLocked,
+    effectiveLocked:
+      effectiveLocked(),
+    activePaneId:
+      state.activePaneId,
     configPath: CONFIG_PATH,
-    panes: state.panes.filter((p) => p.id <= state.paneCount).map((p) => {
-      const win = panes.get(p.id);
-      return {
-        id: p.id,
-        visible: usable(win) ? win.isVisible() : p.visible,
-        minimized: usable(win) ? win.isMinimized() : false,
-        url: p.url,
-        bounds: usable(win) ? win.getBounds() : p.bounds
-      };
-    })
+    tiledLayout: {
+      ...currentTiledLayout()
+    },
+    panes: state.panes
+      .filter(
+        (pane) =>
+          pane.id <=
+          state.paneCount
+      )
+      .map((pane) => {
+        const window =
+          panes.get(pane.id);
+
+        return {
+          id: pane.id,
+          visible:
+            usable(window)
+              ? window.isVisible()
+              : pane.visible,
+          minimized:
+            usable(window)
+              ? window.isMinimized()
+              : false,
+          url: pane.url,
+          bounds:
+            usable(window)
+              ? window.getBounds()
+              : pane.floatingBounds,
+          floatingBounds:
+            pane.floatingBounds
+        };
+      })
   };
 }
 
 function broadcastState() {
-  if (usable(controller) && !controller.webContents.isDestroyed()) {
-    controller.webContents.send("workspace:state", publicState());
+  if (
+    usable(controller) &&
+    !controller.webContents
+      .isDestroyed()
+  ) {
+    controller.webContents.send(
+      "workspace:state",
+      publicState()
+    );
   }
 }
 
 function broadcastActive() {
-  for (const [id, win] of panes) {
-    if (usable(win)) win.webContents.send("workspace:pane-active", id === state.activePaneId);
+  for (
+    const [id, window]
+    of panes.entries()
+  ) {
+    if (!usable(window)) {
+      continue;
+    }
+
+    window.webContents.send(
+      "workspace:pane-active",
+      id === state.activePaneId
+    );
   }
+
   broadcastState();
 }
 
 function setActive(id) {
-  state.activePaneId = clamp(id, 1, state.paneCount, state.activePaneId);
+  state.activePaneId =
+    clampInteger(
+      id,
+      1,
+      state.paneCount,
+      state.activePaneId
+    );
+
   saveSoon();
   broadcastActive();
 }
 
-function updateBounds(id) {
-  const win = panes.get(id);
-  const p = paneState(id);
-  if (!usable(win) || !p) return;
-  p.bounds = win.getBounds();
+function captureFloatingBounds(id) {
+  if (
+    state.layoutMode !==
+    "floating" ||
+    applyingLayout
+  ) {
+    return;
+  }
+
+  const window =
+    panes.get(id);
+
+  const pane =
+    paneState(id);
+
+  if (
+    !usable(window) ||
+    !pane
+  ) {
+    return;
+  }
+
+  pane.floatingBounds =
+    normalizeFloatingBounds(
+      window.getBounds()
+    );
+
   saveSoon();
   broadcastState();
 }
 
+function captureAllFloatingBounds() {
+  if (
+    state.layoutMode !==
+    "floating"
+  ) {
+    return;
+  }
+
+  for (
+    let id = 1;
+    id <= state.paneCount;
+    id += 1
+  ) {
+    const pane =
+      paneState(id);
+
+    const window =
+      panes.get(id);
+
+    if (
+      pane &&
+      usable(window)
+    ) {
+      pane.floatingBounds =
+        normalizeFloatingBounds(
+          window.getBounds()
+        );
+    }
+  }
+}
+
 function updateUrl(id, url) {
-  if (!validChatGPTUrl(url)) return;
-  const p = paneState(id);
-  if (!p) return;
-  p.url = url;
+  if (!validChatGPTUrl(url)) {
+    return;
+  }
+
+  const pane =
+    paneState(id);
+
+  if (!pane) {
+    return;
+  }
+
+  pane.url = url;
   saveSoon();
   broadcastState();
 }
 
 function defaultFloatingBounds(id) {
-  const a = screen.getPrimaryDisplay().workArea;
-  const width = Math.min(760, Math.max(MIN_W, Math.floor(a.width * 0.48)));
-  const height = Math.min(820, Math.max(MIN_H, Math.floor(a.height * 0.76)));
-  const o = (id - 1) * 34;
+  const area =
+    screen.getPrimaryDisplay()
+      .workArea;
+
+  const width = Math.min(
+    760,
+    Math.max(
+      FLOATING_MIN_WIDTH,
+      Math.floor(
+        area.width * 0.48
+      )
+    )
+  );
+
+  const height = Math.min(
+    820,
+    Math.max(
+      FLOATING_MIN_HEIGHT,
+      Math.floor(
+        area.height * 0.76
+      )
+    )
+  );
+
+  const offset =
+    (id - 1) * 34;
+
   return {
-    x: Math.min(a.x + a.width - width - 12, a.x + 36 + o),
-    y: Math.min(a.y + a.height - height - 12, a.y + TOOLBAR_H + 24 + o),
+    x: Math.min(
+      area.x +
+        area.width -
+        width -
+        12,
+      area.x + 36 + offset
+    ),
+    y: Math.min(
+      area.y +
+        area.height -
+        height -
+        12,
+      area.y +
+        TOOLBAR_HEIGHT +
+        24 +
+        offset
+    ),
     width,
     height
   };
 }
 
-function createPane(id) {
-  const current = panes.get(id);
-  if (usable(current)) return current;
+function applyPaneInteractionMode(
+  window
+) {
+  if (!usable(window)) {
+    return;
+  }
 
-  const p = paneState(id);
-  const bounds = normalizeBounds(p.bounds) || defaultFloatingBounds(id);
-  const win = new BrowserWindow({
-    ...bounds,
-    minWidth: MIN_W,
-    minHeight: MIN_H,
-    show: false,
-    frame: true,
-    movable: !state.layoutLocked,
-    resizable: !state.layoutLocked,
-    skipTaskbar: true,
-    autoHideMenuBar: true,
-    title: `ChatGPT Pane ${id}`,
-    backgroundColor: "#212121",
-    webPreferences: {
-      partition: PARTITION,
-      preload: path.join(__dirname, "..", "preload", "pane-preload.js"),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true
-    }
-  });
+  if (
+    state.layoutMode === "tiled"
+  ) {
+    window.setMinimumSize(
+      TILED_MIN_WIDTH,
+      TILED_MIN_HEIGHT
+    );
 
-  win.removeMenu();
-  panes.set(id, win);
+    window.setMovable(false);
+    window.setResizable(false);
+    window.setMaximizable(false);
+    return;
+  }
 
-  win.on("focus", () => setActive(id));
-  win.on("move", () => { if (!applyingLayout) updateBounds(id); });
-  win.on("resize", () => { if (!applyingLayout) updateBounds(id); });
-  win.on("minimize", broadcastState);
-  win.on("restore", () => { setActive(id); broadcastState(); });
-  win.on("show", () => { p.visible = true; saveSoon(); broadcastState(); });
-  win.on("hide", () => { p.visible = false; saveSoon(); broadcastState(); });
-  win.on("close", (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    win.hide();
-  });
-  win.on("closed", () => panes.delete(id));
+  window.setMinimumSize(
+    FLOATING_MIN_WIDTH,
+    FLOATING_MIN_HEIGHT
+  );
 
-  win.webContents.on("did-navigate", (_e, url) => updateUrl(id, url));
-  win.webContents.on("did-navigate-in-page", (_e, url, mainFrame) => {
-    if (mainFrame) updateUrl(id, url);
-  });
+  window.setMovable(
+    !state.layoutLocked
+  );
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (validChatGPTUrl(url)) win.loadURL(url);
-    else shell.openExternal(url).catch(() => {});
-    return { action: "deny" };
-  });
+  window.setResizable(
+    !state.layoutLocked
+  );
 
-  win.webContents.on("will-navigate", (event, url) => {
-    if (validChatGPTUrl(url)) return;
-    event.preventDefault();
-    shell.openExternal(url).catch(() => {});
-  });
-
-  win.once("ready-to-show", () => {
-    if (p.visible) win.show();
-    broadcastActive();
-  });
-
-  win.loadURL(p.url || CHATGPT_URL).catch((error) => {
-    console.error(`[v5.0-A] pane ${id} load failed:`, error.message);
-  });
-  return win;
+  window.setMaximizable(
+    !state.layoutLocked
+  );
 }
 
-function showPane(id, focus = false) {
-  if (id < 1 || id > state.paneCount) return;
-  const p = paneState(id);
-  const win = createPane(id);
-  p.visible = true;
-  if (win.isMinimized()) win.restore();
-  win.show();
+function createPane(id) {
+  const current =
+    panes.get(id);
+
+  if (usable(current)) {
+    return current;
+  }
+
+  const pane =
+    paneState(id);
+
+  const initialBounds =
+    normalizeFloatingBounds(
+      pane.floatingBounds
+    ) ||
+    defaultFloatingBounds(id);
+
+  const window =
+    new BrowserWindow({
+      ...initialBounds,
+      minWidth:
+        FLOATING_MIN_WIDTH,
+      minHeight:
+        FLOATING_MIN_HEIGHT,
+      show: false,
+      frame: true,
+      movable:
+        state.layoutMode ===
+          "floating" &&
+        !state.layoutLocked,
+      resizable:
+        state.layoutMode ===
+          "floating" &&
+        !state.layoutLocked,
+      maximizable:
+        state.layoutMode ===
+          "floating" &&
+        !state.layoutLocked,
+      skipTaskbar: true,
+      autoHideMenuBar: true,
+      title:
+        `ChatGPT Pane ${id}`,
+      backgroundColor: "#212121",
+      webPreferences: {
+        partition: PARTITION,
+        preload: path.join(
+          __dirname,
+          "..",
+          "preload",
+          "pane-preload.js"
+        ),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true
+      }
+    });
+
+  window.removeMenu();
+  panes.set(id, window);
+
+  window.on(
+    "focus",
+    () => setActive(id)
+  );
+
+  window.on(
+    "move",
+    () => {
+      captureFloatingBounds(id);
+    }
+  );
+
+  window.on(
+    "resize",
+    () => {
+      captureFloatingBounds(id);
+    }
+  );
+
+  window.on(
+    "minimize",
+    broadcastState
+  );
+
+  window.on(
+    "restore",
+    () => {
+      setActive(id);
+      broadcastState();
+    }
+  );
+
+  window.on(
+    "show",
+    () => {
+      pane.visible = true;
+      saveSoon();
+      broadcastState();
+    }
+  );
+
+  window.on(
+    "hide",
+    () => {
+      pane.visible = false;
+      saveSoon();
+      broadcastState();
+    }
+  );
+
+  window.on(
+    "close",
+    (event) => {
+      if (quitting) {
+        return;
+      }
+
+      event.preventDefault();
+      window.hide();
+    }
+  );
+
+  window.on(
+    "closed",
+    () => {
+      panes.delete(id);
+    }
+  );
+
+  window.webContents.on(
+    "did-navigate",
+    (_event, url) => {
+      updateUrl(id, url);
+    }
+  );
+
+  window.webContents.on(
+    "did-navigate-in-page",
+    (
+      _event,
+      url,
+      isMainFrame
+    ) => {
+      if (isMainFrame) {
+        updateUrl(id, url);
+      }
+    }
+  );
+
+  window.webContents
+    .setWindowOpenHandler(
+      ({ url }) => {
+        if (
+          validChatGPTUrl(url)
+        ) {
+          window.loadURL(url);
+        } else {
+          shell
+            .openExternal(url)
+            .catch(() => {});
+        }
+
+        return {
+          action: "deny"
+        };
+      }
+    );
+
+  window.webContents.on(
+    "will-navigate",
+    (event, url) => {
+      if (
+        validChatGPTUrl(url)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      shell
+        .openExternal(url)
+        .catch(() => {});
+    }
+  );
+
+  window.once(
+    "ready-to-show",
+    () => {
+      applyPaneInteractionMode(
+        window
+      );
+
+      if (pane.visible) {
+        window.show();
+      }
+
+      broadcastActive();
+    }
+  );
+
+  window
+    .loadURL(
+      pane.url ||
+      CHATGPT_URL
+    )
+    .catch((error) => {
+      console.error(
+        `[v5.0-B] pane ${id} load failed:`,
+        error.message
+      );
+    });
+
+  return window;
+}
+
+function showPane(
+  id,
+  focus = false
+) {
+  if (
+    id < 1 ||
+    id > state.paneCount
+  ) {
+    return;
+  }
+
+  const pane =
+    paneState(id);
+
+  const window =
+    createPane(id);
+
+  pane.visible = true;
+
+  if (window.isMinimized()) {
+    window.restore();
+  }
+
+  window.show();
+
   if (focus) {
-    win.focus();
+    window.focus();
     setActive(id);
   }
+
   saveSoon();
 }
 
 function hidePane(id) {
-  const p = paneState(id);
-  const win = panes.get(id);
-  if (!p) return;
-  p.visible = false;
-  if (usable(win)) win.hide();
+  const pane =
+    paneState(id);
+
+  const window =
+    panes.get(id);
+
+  if (!pane) {
+    return;
+  }
+
+  pane.visible = false;
+
+  if (usable(window)) {
+    window.hide();
+  }
+
   saveSoon();
   broadcastState();
 }
 
 function showAll() {
-  for (let id = 1; id <= state.paneCount; id += 1) showPane(id);
-  showPane(state.activePaneId, true);
+  for (
+    let id = 1;
+    id <= state.paneCount;
+    id += 1
+  ) {
+    showPane(id);
+  }
+
+  showPane(
+    state.activePaneId,
+    true
+  );
 }
 
 function hideAll() {
-  for (let id = 1; id <= state.paneCount; id += 1) hidePane(id);
+  for (
+    let id = 1;
+    id <= state.paneCount;
+    id += 1
+  ) {
+    hidePane(id);
+  }
+
   if (usable(controller)) {
     controller.show();
     controller.focus();
   }
 }
 
-function tileBounds(count) {
-  const a = screen.getPrimaryDisplay().workArea;
-  const area = {
-    x: a.x + GAP,
-    y: a.y + TOOLBAR_H + GAP * 2,
-    width: a.width - GAP * 2,
-    height: a.height - TOOLBAR_H - GAP * 3
-  };
+function tileArea() {
+  const workArea =
+    screen.getPrimaryDisplay()
+      .workArea;
 
-  function grid(cols, rows) {
-    const cw = Math.floor((area.width - GAP * (cols - 1)) / cols);
-    const ch = Math.floor((area.height - GAP * (rows - 1)) / rows);
-    return Array.from({ length: count }, (_, i) => {
-      const c = i % cols;
-      const r = Math.floor(i / cols);
-      return {
-        x: area.x + c * (cw + GAP),
-        y: area.y + r * (ch + GAP),
-        width: c === cols - 1 ? area.width - c * (cw + GAP) : cw,
-        height: r === rows - 1 ? area.height - r * (ch + GAP) : ch
-      };
-    });
+  return {
+    x:
+      workArea.x +
+      GAP,
+    y:
+      workArea.y +
+      TOOLBAR_HEIGHT +
+      GAP * 2,
+    width:
+      workArea.width -
+      GAP * 2,
+    height:
+      workArea.height -
+      TOOLBAR_HEIGHT -
+      GAP * 3
+  };
+}
+
+function minimumRatio(
+  pixels,
+  totalPixels
+) {
+  return Math.min(
+    0.28,
+    Math.max(
+      0.10,
+      (
+        pixels +
+        GAP
+      ) /
+        Math.max(
+          1,
+          totalPixels
+        )
+    )
+  );
+}
+
+function normalizeTiledLayoutForArea(
+  count,
+  raw,
+  area
+) {
+  const input =
+    normalizeStoredTiledLayout(
+      count,
+      raw
+    );
+
+  const minimumX =
+    minimumRatio(
+      TILED_MIN_WIDTH,
+      area.width
+    );
+
+  const minimumY =
+    minimumRatio(
+      TILED_MIN_HEIGHT,
+      area.height
+    );
+
+  if (count === 1) {
+    return {};
   }
 
-  if (count === 1) return [{ ...area }];
-  if (count === 2) return grid(2, 1);
-  if (count === 3) return grid(3, 1);
-  if (count === 4) return grid(2, 2);
-  if (count === 6) return grid(3, 2);
+  if (count === 2) {
+    return {
+      x1: clamp(
+        input.x1,
+        minimumX,
+        1 - minimumX,
+        0.5
+      )
+    };
+  }
 
-  const topH = Math.floor((area.height - GAP) / 2);
-  const topW = Math.floor((area.width - GAP * 2) / 3);
-  const bottomW = Math.floor((area.width - GAP) / 2);
+  if (count === 3) {
+    const x1 = clamp(
+      input.x1,
+      minimumX,
+      1 - minimumX * 2,
+      1 / 3
+    );
+
+    const x2 = clamp(
+      input.x2,
+      x1 + minimumX,
+      1 - minimumX,
+      2 / 3
+    );
+
+    return {
+      x1,
+      x2
+    };
+  }
+
+  if (count === 4) {
+    return {
+      x1: clamp(
+        input.x1,
+        minimumX,
+        1 - minimumX,
+        0.5
+      ),
+      y1: clamp(
+        input.y1,
+        minimumY,
+        1 - minimumY,
+        0.5
+      )
+    };
+  }
+
+  if (count === 5) {
+    const topX1 = clamp(
+      input.topX1,
+      minimumX,
+      1 - minimumX * 2,
+      1 / 3
+    );
+
+    const topX2 = clamp(
+      input.topX2,
+      topX1 + minimumX,
+      1 - minimumX,
+      2 / 3
+    );
+
+    return {
+      y1: clamp(
+        input.y1,
+        minimumY,
+        1 - minimumY,
+        0.5
+      ),
+      topX1,
+      topX2,
+      bottomX1: clamp(
+        input.bottomX1,
+        minimumX,
+        1 - minimumX,
+        0.5
+      )
+    };
+  }
+
+  const x1 = clamp(
+    input.x1,
+    minimumX,
+    1 - minimumX * 2,
+    1 / 3
+  );
+
+  const x2 = clamp(
+    input.x2,
+    x1 + minimumX,
+    1 - minimumX,
+    2 / 3
+  );
+
+  return {
+    x1,
+    x2,
+    y1: clamp(
+      input.y1,
+      minimumY,
+      1 - minimumY,
+      0.5
+    )
+  };
+}
+
+function splitLength(
+  totalLength,
+  ratios,
+  gapCount
+) {
+  const usableLength =
+    Math.max(
+      1,
+      totalLength -
+      GAP * gapCount
+    );
+
+  const boundaries = [
+    0,
+    ...ratios,
+    1
+  ];
+
+  const lengths = [];
+
+  for (
+    let index = 0;
+    index <
+      boundaries.length - 1;
+    index += 1
+  ) {
+    const start = Math.round(
+      usableLength *
+        boundaries[index]
+    );
+
+    const end =
+      index ===
+      boundaries.length - 2
+        ? usableLength
+        : Math.round(
+            usableLength *
+              boundaries[index + 1]
+          );
+
+    lengths.push(
+      Math.max(
+        1,
+        end - start
+      )
+    );
+  }
+
+  return lengths;
+}
+
+function gridBounds(
+  area,
+  columns,
+  rows
+) {
+  const columnWidths =
+    splitLength(
+      area.width,
+      columns,
+      columns.length
+    );
+
+  const rowHeights =
+    splitLength(
+      area.height,
+      rows,
+      rows.length
+    );
+
+  const result = [];
+
+  let y = area.y;
+
+  for (
+    let row = 0;
+    row <
+      rowHeights.length;
+    row += 1
+  ) {
+    let x = area.x;
+
+    for (
+      let column = 0;
+      column <
+        columnWidths.length;
+      column += 1
+    ) {
+      result.push({
+        x,
+        y,
+        width:
+          columnWidths[column],
+        height:
+          rowHeights[row]
+      });
+
+      x +=
+        columnWidths[column] +
+        GAP;
+    }
+
+    y +=
+      rowHeights[row] +
+      GAP;
+  }
+
+  return result;
+}
+
+function tiledBounds(count) {
+  const area = tileArea();
+
+  const layout =
+    normalizeTiledLayoutForArea(
+      count,
+      state.tiledLayouts[
+        String(count)
+      ],
+      area
+    );
+
+  state.tiledLayouts[
+    String(count)
+  ] = layout;
+
+  if (count === 1) {
+    return [{
+      ...area
+    }];
+  }
+
+  if (count === 2) {
+    return gridBounds(
+      area,
+      [layout.x1],
+      []
+    );
+  }
+
+  if (count === 3) {
+    return gridBounds(
+      area,
+      [
+        layout.x1,
+        layout.x2
+      ],
+      []
+    );
+  }
+
+  if (count === 4) {
+    return gridBounds(
+      area,
+      [layout.x1],
+      [layout.y1]
+    );
+  }
+
+  if (count === 6) {
+    return gridBounds(
+      area,
+      [
+        layout.x1,
+        layout.x2
+      ],
+      [layout.y1]
+    );
+  }
+
+  /*
+   * Five panes have independent
+   * top and bottom row columns.
+   */
+  const rowHeights =
+    splitLength(
+      area.height,
+      [layout.y1],
+      1
+    );
+
+  const topArea = {
+    x: area.x,
+    y: area.y,
+    width: area.width,
+    height: rowHeights[0]
+  };
+
+  const bottomArea = {
+    x: area.x,
+    y:
+      area.y +
+      rowHeights[0] +
+      GAP,
+    width: area.width,
+    height: rowHeights[1]
+  };
+
   return [
-    ...Array.from({ length: 3 }, (_, i) => ({
-      x: area.x + i * (topW + GAP),
-      y: area.y,
-      width: i === 2 ? area.width - i * (topW + GAP) : topW,
-      height: topH
-    })),
-    ...Array.from({ length: 2 }, (_, i) => ({
-      x: area.x + i * (bottomW + GAP),
-      y: area.y + topH + GAP,
-      width: i === 1 ? area.width - bottomW - GAP : bottomW,
-      height: area.height - topH - GAP
-    }))
+    ...gridBounds(
+      topArea,
+      [
+        layout.topX1,
+        layout.topX2
+      ],
+      []
+    ),
+    ...gridBounds(
+      bottomArea,
+      [layout.bottomX1],
+      []
+    )
   ];
 }
 
+function applyInteractionModeToAll() {
+  for (
+    const window
+    of panes.values()
+  ) {
+    applyPaneInteractionMode(
+      window
+    );
+  }
+}
+
 function arrange() {
-  const list = tileBounds(state.paneCount);
+  const boundsList =
+    tiledBounds(
+      state.paneCount
+    );
+
   applyingLayout = true;
+
   try {
-    for (let id = 1; id <= state.paneCount; id += 1) {
-      const p = paneState(id);
-      const win = createPane(id);
-      p.visible = true;
-      p.bounds = list[id - 1];
-      if (win.isMinimized()) win.restore();
-      win.setBounds(list[id - 1], false);
-      win.show();
+    for (
+      let id = 1;
+      id <= state.paneCount;
+      id += 1
+    ) {
+      const pane =
+        paneState(id);
+
+      const window =
+        createPane(id);
+
+      pane.visible = true;
+
+      applyPaneInteractionMode(
+        window
+      );
+
+      if (window.isMinimized()) {
+        window.restore();
+      }
+
+      window.setBounds(
+        boundsList[id - 1],
+        false
+      );
+
+      window.show();
     }
   } finally {
-    setTimeout(() => {
-      applyingLayout = false;
-      saveNow();
-      broadcastState();
-    }, 120);
+    setTimeout(
+      () => {
+        applyingLayout = false;
+        saveNow();
+        broadcastState();
+      },
+      120
+    );
+  }
+}
+
+function restoreFloatingLayout() {
+  applyingLayout = true;
+
+  try {
+    for (
+      let id = 1;
+      id <= state.paneCount;
+      id += 1
+    ) {
+      const pane =
+        paneState(id);
+
+      const window =
+        createPane(id);
+
+      const bounds =
+        normalizeFloatingBounds(
+          pane.floatingBounds
+        ) ||
+        defaultFloatingBounds(id);
+
+      pane.floatingBounds =
+        bounds;
+
+      applyPaneInteractionMode(
+        window
+      );
+
+      window.setBounds(
+        bounds,
+        false
+      );
+
+      if (pane.visible) {
+        if (window.isMinimized()) {
+          window.restore();
+        }
+
+        window.show();
+      } else {
+        window.hide();
+      }
+    }
+  } finally {
+    setTimeout(
+      () => {
+        applyingLayout = false;
+        saveNow();
+        broadcastState();
+      },
+      120
+    );
   }
 }
 
 function setLocked(value) {
-  state.layoutLocked = Boolean(value);
-  for (const win of panes.values()) {
-    if (!usable(win)) continue;
-    win.setMovable(!state.layoutLocked);
-    win.setResizable(!state.layoutLocked);
-  }
+  state.layoutLocked =
+    Boolean(value);
+
+  applyInteractionModeToAll();
   saveNow();
   broadcastState();
 }
 
 function setMode(mode) {
-  state.layoutMode = mode === "tiled" ? "tiled" : "floating";
-  if (state.layoutMode === "tiled") arrange();
-  else {
+  const nextMode =
+    mode === "tiled"
+      ? "tiled"
+      : "floating";
+
+  if (
+    nextMode ===
+    state.layoutMode
+  ) {
+    if (
+      nextMode === "tiled"
+    ) {
+      arrange();
+    } else {
+      restoreFloatingLayout();
+    }
+
+    return;
+  }
+
+  if (
+    state.layoutMode ===
+    "floating"
+  ) {
+    captureAllFloatingBounds();
+  }
+
+  state.layoutMode = nextMode;
+
+  if (
+    nextMode === "tiled"
+  ) {
+    arrange();
+  } else {
+    restoreFloatingLayout();
+  }
+}
+
+function setCount(value) {
+  const count =
+    clampInteger(
+      value,
+      1,
+      MAX_PANES,
+      state.paneCount
+    );
+
+  if (
+    state.layoutMode ===
+    "floating"
+  ) {
+    captureAllFloatingBounds();
+  }
+
+  state.paneCount = count;
+
+  if (
+    state.activePaneId > count
+  ) {
+    state.activePaneId =
+      count;
+  }
+
+  for (
+    let id = 1;
+    id <= MAX_PANES;
+    id += 1
+  ) {
+    const pane =
+      paneState(id);
+
+    if (id <= count) {
+      pane.visible = true;
+      createPane(id);
+    } else {
+      pane.visible = false;
+
+      const window =
+        panes.get(id);
+
+      if (usable(window)) {
+        window.hide();
+      }
+    }
+  }
+
+  if (
+    state.layoutMode === "tiled"
+  ) {
+    arrange();
+  } else {
+    restoreFloatingLayout();
+    showAll();
+  }
+}
+
+function setTiledLayout(patch) {
+  if (
+    !patch ||
+    typeof patch !== "object"
+  ) {
+    return;
+  }
+
+  const key =
+    String(state.paneCount);
+
+  state.tiledLayouts[key] = {
+    ...state.tiledLayouts[key],
+    ...patch
+  };
+
+  if (
+    state.layoutMode === "tiled"
+  ) {
+    arrange();
+  } else {
     saveNow();
     broadcastState();
   }
 }
 
-function setCount(value) {
-  const count = clamp(value, 1, MAX_PANES, state.paneCount);
-  state.paneCount = count;
-  if (state.activePaneId > count) state.activePaneId = count;
+function resetTiledLayout() {
+  const key =
+    String(state.paneCount);
 
-  for (let id = 1; id <= MAX_PANES; id += 1) {
-    const p = paneState(id);
-    if (id <= count) {
-      p.visible = true;
-      createPane(id);
-    } else {
-      p.visible = false;
-      const win = panes.get(id);
-      if (usable(win)) win.hide();
-    }
-  }
+  state.tiledLayouts[key] = {
+    ...defaultTiledLayouts()[key]
+  };
 
-  if (state.layoutMode === "tiled") arrange();
-  else {
-    showAll();
+  if (
+    state.layoutMode === "tiled"
+  ) {
+    arrange();
+  } else {
     saveNow();
     broadcastState();
   }
 }
 
 function togglePane(id) {
-  if (id < 1 || id > state.paneCount) return;
-  const win = panes.get(id);
-  if (usable(win) && win.isVisible()) hidePane(id);
-  else showPane(id, true);
+  if (
+    id < 1 ||
+    id > state.paneCount
+  ) {
+    return;
+  }
+
+  const window =
+    panes.get(id);
+
+  if (
+    usable(window) &&
+    window.isVisible()
+  ) {
+    hidePane(id);
+  } else {
+    showPane(id, true);
+  }
 }
 
 function positionController() {
-  if (!usable(controller)) return;
-  const a = screen.getPrimaryDisplay().workArea;
+  if (!usable(controller)) {
+    return;
+  }
+
+  const area =
+    screen.getPrimaryDisplay()
+      .workArea;
+
+  const width = Math.min(
+    TOOLBAR_WIDTH,
+    area.width - GAP * 2
+  );
+
   controller.setBounds({
-    x: a.x + Math.round((a.width - Math.min(TOOLBAR_W, a.width - GAP * 2)) / 2),
-    y: a.y + GAP,
-    width: Math.min(TOOLBAR_W, a.width - GAP * 2),
-    height: TOOLBAR_H
+    x:
+      area.x +
+      Math.round(
+        (
+          area.width -
+          width
+        ) / 2
+      ),
+    y: area.y + GAP,
+    width,
+    height: TOOLBAR_HEIGHT
   });
 }
 
 function createController() {
-  controller = new BrowserWindow({
-    width: TOOLBAR_W,
-    height: TOOLBAR_H,
-    minWidth: 620,
-    minHeight: TOOLBAR_H,
-    maxHeight: TOOLBAR_H,
-    show: false,
-    frame: true,
-    resizable: true,
-    maximizable: false,
-    alwaysOnTop: true,
-    skipTaskbar: false,
-    autoHideMenuBar: true,
-    title: "ChatGPT Floating Workspace v5.0-A",
-    backgroundColor: "#171717",
-    webPreferences: {
-      preload: path.join(__dirname, "..", "preload", "controller-preload.js"),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true
-    }
-  });
+  controller =
+    new BrowserWindow({
+      width: TOOLBAR_WIDTH,
+      height: TOOLBAR_HEIGHT,
+      minWidth: 720,
+      minHeight:
+        TOOLBAR_HEIGHT,
+      maxHeight:
+        TOOLBAR_HEIGHT,
+      show: false,
+      frame: true,
+      resizable: true,
+      maximizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: false,
+      autoHideMenuBar: true,
+      title:
+        "ChatGPT Floating Workspace v5.0-B",
+      backgroundColor: "#171717",
+      webPreferences: {
+        preload: path.join(
+          __dirname,
+          "..",
+          "preload",
+          "controller-preload.js"
+        ),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true
+      }
+    });
 
   controller.removeMenu();
   positionController();
-  controller.loadFile(path.join(__dirname, "..", "..", "ui", "controller.html"));
 
-  controller.once("ready-to-show", () => {
-    controller.show();
-    broadcastState();
-  });
-  controller.on("close", () => { quitting = true; });
-  controller.on("closed", () => {
-    controller = null;
-    app.quit();
-  });
+  controller.loadFile(
+    path.join(
+      __dirname,
+      "..",
+      "..",
+      "ui",
+      "controller.html"
+    )
+  );
+
+  controller.once(
+    "ready-to-show",
+    () => {
+      controller.show();
+      broadcastState();
+    }
+  );
+
+  controller.on(
+    "close",
+    () => {
+      quitting = true;
+    }
+  );
+
+  controller.on(
+    "closed",
+    () => {
+      controller = null;
+      app.quit();
+    }
+  );
 }
 
 function registerIpc() {
-  ipcMain.handle("workspace:get-state", () => publicState());
-  ipcMain.handle("workspace:set-pane-count", (_e, n) => { setCount(n); return publicState(); });
-  ipcMain.handle("workspace:set-layout-mode", (_e, m) => { setMode(m); return publicState(); });
-  ipcMain.handle("workspace:arrange", () => { arrange(); return publicState(); });
-  ipcMain.handle("workspace:set-layout-locked", (_e, v) => { setLocked(v); return publicState(); });
-  ipcMain.handle("workspace:show-all", () => { showAll(); return publicState(); });
-  ipcMain.handle("workspace:hide-all", () => { hideAll(); return publicState(); });
-  ipcMain.handle("workspace:focus-pane", (_e, id) => {
-    id = clamp(id, 1, state.paneCount, state.activePaneId);
-    showPane(id, true);
-    return publicState();
-  });
-  ipcMain.handle("workspace:toggle-pane", (_e, id) => {
-    togglePane(clamp(id, 1, state.paneCount, state.activePaneId));
-    return publicState();
-  });
+  ipcMain.handle(
+    "workspace:get-state",
+    () => publicState()
+  );
+
+  ipcMain.handle(
+    "workspace:set-pane-count",
+    (_event, count) => {
+      setCount(count);
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:set-layout-mode",
+    (_event, mode) => {
+      setMode(mode);
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:arrange",
+    () => {
+      if (
+        state.layoutMode !== "tiled"
+      ) {
+        setMode("tiled");
+      } else {
+        arrange();
+      }
+
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:set-layout-locked",
+    (_event, value) => {
+      setLocked(value);
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:set-tiled-layout",
+    (_event, patch) => {
+      setTiledLayout(patch);
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:reset-tiled-layout",
+    () => {
+      resetTiledLayout();
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:show-all",
+    () => {
+      showAll();
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:hide-all",
+    () => {
+      hideAll();
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:focus-pane",
+    (_event, id) => {
+      const safeId =
+        clampInteger(
+          id,
+          1,
+          state.paneCount,
+          state.activePaneId
+        );
+
+      showPane(
+        safeId,
+        true
+      );
+
+      return publicState();
+    }
+  );
+
+  ipcMain.handle(
+    "workspace:toggle-pane",
+    (_event, id) => {
+      togglePane(
+        clampInteger(
+          id,
+          1,
+          state.paneCount,
+          state.activePaneId
+        )
+      );
+
+      return publicState();
+    }
+  );
 }
 
 app.whenReady().then(() => {
   state = loadState();
+
   registerIpc();
   createController();
-  for (let id = 1; id <= state.paneCount; id += 1) createPane(id);
-  setLocked(state.layoutLocked);
-  if (state.layoutMode === "tiled") arrange();
-  else {
-    for (let id = 1; id <= state.paneCount; id += 1) {
-      if (paneState(id).visible) showPane(id);
+
+  for (
+    let id = 1;
+    id <= state.paneCount;
+    id += 1
+  ) {
+    createPane(id);
+  }
+
+  applyInteractionModeToAll();
+
+  if (
+    state.layoutMode === "tiled"
+  ) {
+    arrange();
+  } else {
+    restoreFloatingLayout();
+  }
+});
+
+app.on(
+  "before-quit",
+  () => {
+    quitting = true;
+
+    if (
+      state.layoutMode ===
+      "floating"
+    ) {
+      captureAllFloatingBounds();
+    }
+
+    saveNow();
+  }
+);
+
+app.on(
+  "window-all-closed",
+  () => {
+    if (
+      process.platform !==
+      "darwin"
+    ) {
+      app.quit();
     }
   }
-});
-
-app.on("before-quit", () => {
-  quitting = true;
-  for (const [id, win] of panes) {
-    if (!usable(win)) continue;
-    const p = paneState(id);
-    p.bounds = win.getBounds();
-    p.visible = win.isVisible();
-  }
-  saveNow();
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+);

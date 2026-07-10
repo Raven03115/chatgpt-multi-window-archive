@@ -7,7 +7,8 @@
     "start": "electron .",
     "poc441": "electron poc-shaped-sidebar-v4.4.1.js",
     "poc451": "electron poc-shaped-sidebar-v4.5.1.js",
-    "v5a": "electron src/main/index.js"
+    "v5a": "electron src/main/index.js",
+    "v5b": "electron src/main/index.js"
   },
   "devDependencies": {
     "electron": "43.1.0"
