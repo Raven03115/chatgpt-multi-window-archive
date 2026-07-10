@@ -16,7 +16,7 @@ const CHATGPT_PARTITION = "persist:chatgpt-shared";
 
 const SIDEBAR_WIDTH = 260;
 
-const DEFAULT_PANE_COUNT = 2;
+const DEFAULT_PANE_COUNT = 1;
 const ALLOWED_PANE_COUNTS = new Set([
   1,
   2,
@@ -108,14 +108,15 @@ const OVERLAY_TRANSPARENCY_CSS = `
   }
 `;
 const PANE_CHROME_CSS = `
+  /*
+   * Keep the static rules deliberately conservative.
+   * ChatGPT occasionally changes wrapper test IDs; hiding a broad
+   * wrapper can remove the entire conversation workspace.
+   */
   #stage-slideover-sidebar,
   [data-testid="sidebar"],
-  [data-testid="sidebar-container"],
   [data-testid="conversation-sidebar"],
-  nav[aria-label="Chat history"],
-  nav[aria-label*="聊天"],
-  nav[aria-label*="對話"],
-  aside:has(a[href^="/c/"]) {
+  nav[aria-label="Chat history"] {
     display: none !important;
     visibility: hidden !important;
     opacity: 0 !important;
@@ -243,7 +244,7 @@ function loadConfig() {
     };
   } catch (error) {
     console.error(
-      "[Integration v4.5.1] config load failed:",
+      "[Integration v4.5.2] config load failed:",
       error.message
     );
 
@@ -273,7 +274,7 @@ function saveConfigNow() {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.5.1] config save failed:",
+      "[Integration v4.5.2] config save failed:",
       error.message
     );
   }
@@ -369,7 +370,7 @@ function isConversationUrl(url) {
 
     return (
       parsed.hostname === "chatgpt.com" &&
-      /^\/c\/[^/]+/.test(parsed.pathname)
+      /(?:^|\/)c\/[^/]+/.test(parsed.pathname)
     );
   } catch {
     return false;
@@ -670,6 +671,10 @@ function getPaneUiInstallerScript() {
         document.documentElement.appendChild(style);
       }
 
+      /*
+       * These include fallback candidates, but a candidate is hidden
+       * only when its geometry still looks like a left sidebar.
+       */
       const sidebarSelectors = [
         "#stage-slideover-sidebar",
         '[data-testid="sidebar"]',
@@ -678,7 +683,8 @@ function getPaneUiInstallerScript() {
         'nav[aria-label="Chat history"]',
         'nav[aria-label*="聊天"]',
         'nav[aria-label*="對話"]',
-        'aside:has(a[href^="/c/"])'
+        'aside:has(a[href^="/c/"])',
+        'aside:has(a[href*="/c/"])'
       ];
 
       const buttonSelectors = [
@@ -696,6 +702,40 @@ function getPaneUiInstallerScript() {
         '[data-testid="open-sidebar-button"]',
         '[data-testid="close-sidebar-button"]'
       ];
+
+      const isSidebarLike = (element) => {
+        if (!(element instanceof Element)) {
+          return false;
+        }
+
+        const rect =
+          element.getBoundingClientRect();
+
+        const style =
+          window.getComputedStyle(element);
+
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          rect.width < 120 ||
+          rect.height < 180
+        ) {
+          return false;
+        }
+
+        const maximumWidth = Math.min(
+          430,
+          window.innerWidth * 0.48
+        );
+
+        return (
+          rect.left <= 20 &&
+          rect.top <= 160 &&
+          rect.width <= maximumWidth &&
+          rect.height >=
+            window.innerHeight * 0.45
+        );
+      };
 
       const hideElement = (element) => {
         element.style.setProperty(
@@ -724,17 +764,28 @@ function getPaneUiInstallerScript() {
       };
 
       const hidePaneChrome = () => {
-        for (const selector of [
-          ...sidebarSelectors,
-          ...buttonSelectors
-        ]) {
+        for (const selector of sidebarSelectors) {
+          try {
+            document
+              .querySelectorAll(selector)
+              .forEach((element) => {
+                if (isSidebarLike(element)) {
+                  hideElement(element);
+                }
+              });
+          } catch {
+            // Ignore selectors temporarily unsupported
+            // by the current page state.
+          }
+        }
+
+        for (const selector of buttonSelectors) {
           try {
             document
               .querySelectorAll(selector)
               .forEach(hideElement);
           } catch {
-            // Ignore selectors temporarily unsupported
-            // by the current page state.
+            // Ignore transient DOM rebuilds.
           }
         }
       };
@@ -742,9 +793,20 @@ function getPaneUiInstallerScript() {
       hidePaneChrome();
 
       if (!window.__chatgptMultiPaneChromeObserver) {
+        let scheduled = false;
+
         window.__chatgptMultiPaneChromeObserver =
           new MutationObserver(() => {
-            hidePaneChrome();
+            if (scheduled) {
+              return;
+            }
+
+            scheduled = true;
+
+            requestAnimationFrame(() => {
+              scheduled = false;
+              hidePaneChrome();
+            });
           });
 
         window.__chatgptMultiPaneChromeObserver.observe(
@@ -781,7 +843,7 @@ async function installPaneUi(view) {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.5.1] pane UI injection failed:",
+      "[Integration v4.5.2] pane UI injection failed:",
       error.message
     );
   }
@@ -862,7 +924,7 @@ async function refreshActivePaneVisuals() {
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.5.1 — Active ${targetIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.5.2 — Active ${targetIndex + 1}/${appConfig.paneCount}`
     );
   }
 }
@@ -881,7 +943,7 @@ function setActivePane(index) {
   activePaneIndex = nextIndex;
 
   console.log(
-    `[Integration v4.5.1] active pane=${activePaneIndex + 1}`
+    `[Integration v4.5.2] active pane=${activePaneIndex + 1}`
   );
 
   refreshActivePaneVisuals();
@@ -915,7 +977,7 @@ function loadUrlInActivePane(url) {
   }
 
   console.log(
-    `[Integration v4.5.1] load pane=${paneIndex + 1} url=${url}`
+    `[Integration v4.5.2] load pane=${paneIndex + 1} url=${url}`
   );
 
   updatePaneUrl(
@@ -929,7 +991,7 @@ function loadUrlInActivePane(url) {
     .loadURL(url)
     .catch((error) => {
       console.error(
-        "[Integration v4.5.1] pane navigation failed:",
+        "[Integration v4.5.2] pane navigation failed:",
         error.message
       );
     })
@@ -944,22 +1006,20 @@ function loadUrlInActivePane(url) {
   refreshActivePaneVisuals();
 }
 
-function completeOverlayConversationSelection(url) {
-  if (
-    !isConversationUrl(url) ||
-    !isWorkspaceRouteUrl(url)
-  ) {
+function completeOverlayWorkspaceSelection(url) {
+  if (!isWorkspaceRouteUrl(url)) {
     return false;
   }
 
   console.log(
-    "[Integration v4.5.1] completing search selection:",
+    "[Integration v4.5.2] completing workspace selection:",
     url
   );
 
   /*
-   * Load the selected conversation into the active pane,
-   * then immediately restore all pane bounds.
+   * Project chats and other workspace routes can use nested paths,
+   * not only /c/<id>. Any non-settings workspace destination should
+   * return control to the active pane.
    */
   loadUrlInActivePane(url);
 
@@ -974,8 +1034,8 @@ function completeOverlayConversationSelection(url) {
     CLOSE_UNLOCK_SUPPRESSION_MS;
 
   /*
-   * A short guard absorbs the overlay page's own navigation
-   * event without making normal sidebar links feel delayed.
+   * A short guard absorbs the overlay page's own duplicate
+   * navigation event without blocking normal sidebar clicks.
    */
   sidebarRouteForwardSuppressionUntil =
     Date.now() + 350;
@@ -1012,28 +1072,19 @@ function handleSidebarNavigation(url) {
   }
 
   /*
-   * Selecting a conversation from Search navigates the
-   * overlay page to /c/... while panes are suppressed.
-   * Treat that navigation as a completed selection.
+   * A normal ChatGPT workspace destination always belongs in the
+   * active pane. Restore pane bounds first, even if ChatGPT briefly
+   * exposed a dialog-like wrapper during navigation.
    */
-  if (
-    overlayOnlyUiActive &&
-    completeOverlayConversationSelection(url)
-  ) {
+  if (completeOverlayWorkspaceSelection(url)) {
     return;
   }
 
   if (shouldSuppressSidebarRouteForwarding()) {
     console.log(
-      "[Integration v4.5.1] suppressed sidebar route:",
+      "[Integration v4.5.2] suppressed sidebar route:",
       url
     );
-
-    return;
-  }
-
-  if (isWorkspaceRouteUrl(url)) {
-    loadUrlInActivePane(url);
   }
 }
 
@@ -1158,7 +1209,7 @@ function dismissSidebarTransientUi() {
     });
   } catch (error) {
     console.error(
-      "[Integration v4.5.1] dismiss input failed:",
+      "[Integration v4.5.2] dismiss input failed:",
       error.message
     );
   }
@@ -1174,6 +1225,10 @@ function attachPaneEvents(view, index) {
   view.webContents.on("focus", () => {
     setActivePane(index);
     dismissSidebarTransientUi();
+  });
+
+  view.webContents.on("dom-ready", () => {
+    installPaneUi(view);
   });
 
   view.webContents.on("did-finish-load", () => {
@@ -1216,7 +1271,7 @@ function attachPaneEvents(view, index) {
     } else {
       shell.openExternal(url).catch((error) => {
         console.error(
-          "[Integration v4.5.1] external link failed:",
+          "[Integration v4.5.2] external link failed:",
           error.message
         );
       });
@@ -1236,6 +1291,10 @@ function createPaneView(index) {
   const view = new WebContentsView({
     webPreferences: {
       partition: CHATGPT_PARTITION,
+      preload: path.join(
+        __dirname,
+        "pane-chrome-preload-v4.5.2.js"
+      ),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -1382,7 +1441,7 @@ function setPaneCount(targetCount) {
     refreshActivePaneVisuals();
 
     console.log(
-      `[Integration v4.5.1] pane count=${nextCount}`
+      `[Integration v4.5.2] pane count=${nextCount}`
     );
   } finally {
     setTimeout(() => {
@@ -1511,7 +1570,7 @@ function sanitizeDialogRect(
     areaRatio >= 0.72
   ) {
     console.log(
-      "[Integration v4.5.1] rejected oversized dialog rect:",
+      "[Integration v4.5.2] rejected oversized dialog rect:",
       {
         sanitized,
         widthRatio,
@@ -1576,7 +1635,7 @@ function applyOverlayShape() {
     "function"
   ) {
     console.error(
-      "[Integration v4.5.1] BrowserWindow.setShape unavailable"
+      "[Integration v4.5.2] BrowserWindow.setShape unavailable"
     );
 
     return;
@@ -1652,7 +1711,7 @@ function applyOverlayShape() {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.5.1] setShape failed:",
+      "[Integration v4.5.2] setShape failed:",
       error.message
     );
   }
@@ -1678,7 +1737,7 @@ function unlockDialogShape() {
   applyOverlayShape();
 
   console.log(
-    "[Integration v4.5.1] dialog shape unlocked"
+    "[Integration v4.5.2] dialog shape unlocked"
   );
 }
 
@@ -1758,7 +1817,7 @@ function createSidebarOverlayWindow() {
 
       preload: path.join(
         __dirname,
-        "sidebar-shape-preload-v4.5.1.js"
+        "sidebar-shape-preload-v4.5.2.js"
       ),
 
       nodeIntegration: false,
@@ -1810,7 +1869,7 @@ function createSidebarOverlayWindow() {
           );
       } catch (error) {
         console.error(
-          "[Integration v4.5.1] transparency CSS failed:",
+          "[Integration v4.5.2] transparency CSS failed:",
           error.message
         );
       }
@@ -1825,7 +1884,7 @@ function createSidebarOverlayWindow() {
       sidebarInitialLoadComplete = true;
 
       console.log(
-        "[Integration v4.5.1] ChatGPT sidebar overlay loaded"
+        "[Integration v4.5.2] ChatGPT sidebar overlay loaded"
       );
     }
   );
@@ -1862,7 +1921,7 @@ function createSidebarOverlayWindow() {
       } else if (!isChatGPTUrl(url)) {
         shell.openExternal(url).catch((error) => {
           console.error(
-            "[Integration v4.5.1] sidebar external link failed:",
+            "[Integration v4.5.2] sidebar external link failed:",
             error.message
           );
         });
@@ -1878,7 +1937,7 @@ function createSidebarOverlayWindow() {
     "render-process-gone",
     (_event, details) => {
       console.error(
-        "[Integration v4.5.1] sidebar renderer stopped:",
+        "[Integration v4.5.2] sidebar renderer stopped:",
         details
       );
     }
@@ -1901,7 +1960,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.5.1 — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.5.2 — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {
@@ -1991,12 +2050,12 @@ function registerShortcut(
       );
 
     console.log(
-      `[Integration v4.5.1] shortcut ${label}: ` +
+      `[Integration v4.5.2] shortcut ${label}: ` +
       `${accelerator}, registered=${registered}`
     );
   } catch (error) {
     console.error(
-      `[Integration v4.5.1] shortcut ${label} failed:`,
+      `[Integration v4.5.2] shortcut ${label} failed:`,
       error.message
     );
   }
@@ -2126,7 +2185,7 @@ ipcMain.on(
       }
 
       console.log(
-        "[Integration v4.5.1] dialog shape locked:",
+        "[Integration v4.5.2] dialog shape locked:",
         lockedDialogRect
       );
     }
@@ -2185,18 +2244,15 @@ ipcMain.on(
       return;
     }
 
-    if (
-      overlayOnlyUiActive &&
-      completeOverlayConversationSelection(url)
-    ) {
+    if (completeOverlayWorkspaceSelection(url)) {
       return;
     }
 
-    if (
-      !shouldSuppressSidebarRouteForwarding() &&
-      isWorkspaceRouteUrl(url)
-    ) {
-      loadUrlInActivePane(url);
+    if (shouldSuppressSidebarRouteForwarding()) {
+      console.log(
+        "[Integration v4.5.2] suppressed sidebar route intent:",
+        url
+      );
     }
   }
 );
@@ -2267,17 +2323,17 @@ app.whenReady().then(() => {
   appConfig = loadConfig();
 
   console.log(
-    "[Integration v4.5.1] Electron:",
+    "[Integration v4.5.2] Electron:",
     process.versions.electron
   );
 
   console.log(
-    "[Integration v4.5.1] userData:",
+    "[Integration v4.5.2] userData:",
     app.getPath("userData")
   );
 
   console.log(
-    "[Integration v4.5.1] restored pane count:",
+    "[Integration v4.5.2] restored pane count:",
     appConfig.paneCount
   );
 

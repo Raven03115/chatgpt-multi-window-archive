@@ -584,7 +584,7 @@ function findBestDialogSurface() {
   const best = results[0];
 
   console.log(
-    "[Sidebar Shape v4.5.1] dialog surface:",
+    "[Sidebar Shape v4.5.2] dialog surface:",
     {
       rect: best.rect,
       score: best.score,
@@ -870,7 +870,7 @@ function isConversationRouteUrl(url) {
     return (
       parsed.protocol === "https:" &&
       parsed.hostname === "chatgpt.com" &&
-      /^\/c\/[^/]+/.test(parsed.pathname)
+      /(?:^|\/)c\/[^/]+/.test(parsed.pathname)
     );
   } catch {
     return false;

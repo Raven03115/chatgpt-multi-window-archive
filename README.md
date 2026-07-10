@@ -1,11 +1,10 @@
-# ChatGPT Multi Pane v4.5.1
+﻿# ChatGPT Multi Pane v4.5.2
 
 非官方的 Windows 多窗格 ChatGPT 工作區。
 
 本程式直接載入官方 `chatgpt.com`，使用你自己的 ChatGPT 帳號與既有訂閱，不使用 OpenAI API，也不會產生額外的 API 用量費用。
 
-> 本專案不是 OpenAI 官方產品，也不隸屬於 OpenAI。
-> 只是想要達到多視窗進行而做的小工具。
+> 本專案不是 OpenAI 官方產品，也不隸屬於 OpenAI。這只是為了讓 ChatGPT 能以多窗格方式同時使用而製作的小工具。
 
 ## 功能
 
@@ -21,13 +20,20 @@
 - 自動保存窗格數量與各窗格最後開啟的 ChatGPT 網址
 - 不使用第三方 ChatGPT 平台
 
+## v4.5.2 更新
+
+- 修正點擊左側對話後，右側窗格可能只顯示灰色畫面的問題
+- 修正右側獨立窗格載入時，內部側邊欄可能持續顯示的問題
+- 改善一般對話、搜尋結果及 Project 內對話的路由轉送
+- 降低側邊欄隱藏規則誤傷主要對話內容的風險
+
 ## 預設窗格數量
 
 全新使用者第一次啟動時，預設為 **1 個窗格**。
 
 使用快捷鍵切換窗格數量後，程式會保存最後使用的布局，下次啟動時自動恢復。
 
-已經使用過舊版本的人，會繼續沿用自己電腦中原本保存的窗格數量，不會被強制改回 1 個。
+已經使用過舊版本的人，會沿用自己電腦中原本保存的窗格數量，不會被強制改回 1 個。
 
 設定檔位置：
 
@@ -90,30 +96,20 @@ npm start
 1. 點擊 GitHub 頁面上的 `Code`
 2. 選擇 `Download ZIP`
 3. 解壓縮檔案
-4. 在解壓後的資料夾開啟 PowerShell
-5. 執行：
+4. 確認電腦已安裝 Node.js
+5. 雙擊：
+
+```text
+start-chatgpt-multi.bat
+```
+
+啟動檔會在第一次使用時自動執行 `npm install`。之後會直接啟動程式。
+
+也可以在專案資料夾開啟 PowerShell，手動執行：
 
 ```powershell
 npm install
 npm start
-```
-
-第一次完成 `npm install` 後，之後也可以直接雙擊：
-
-```text
-start-chatgpt-multi.bat
-```
-
-## 啟動
-
-```powershell
-npm start
-```
-
-或雙擊：
-
-```text
-start-chatgpt-multi.bat
 ```
 
 ## 更新
@@ -170,4 +166,4 @@ npm start
 
 ## 版本
 
-目前公開穩定版：`v4.5.1`
+目前公開穩定版：`v4.5.2`

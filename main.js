@@ -1,4 +1,4 @@
-const { app } = require("electron");
+﻿const { app } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
@@ -35,9 +35,9 @@ try {
   }
 } catch (error) {
   console.error(
-    "[Bootstrap v4.5.1] failed to create default layout config:",
+    "[Bootstrap v4.5.2] failed to create default layout config:",
     error.message
   );
 }
 
-require("./poc-shaped-sidebar-v4.5.1.js");
+require("./poc-shaped-sidebar-v4.5.2.js");
