@@ -65,27 +65,13 @@ const OVERLAY_TRANSPARENCY_CSS = `
   }
 
   /*
-   * Reveal only active overlay roots.
+   * Do not override visibility or pointer-events for dialogs, selects,
+   * menus, listboxes or their descendants.
    *
-   * Descendants inherit normal visibility from the overlay root. Hidden
-   * options inside settings, selects and menus can therefore remain
-   * hidden instead of being forced visible by a broad "*“ selector.
+   * ChatGPT controls those states itself. The shaped overlay window
+   * already limits which screen regions are exposed, so forcing overlay
+   * roots visible is unnecessary and can reveal stacked hidden labels.
    */
-  [role="dialog"]:not([aria-hidden="true"]):not([hidden]),
-  [aria-modal="true"]:not([aria-hidden="true"]):not([hidden]),
-  [popover]:popover-open,
-  [role="menu"][data-state="open"],
-  [role="listbox"][data-state="open"],
-  [role="tooltip"][data-state="open"],
-  [data-radix-dialog-content]:not([data-state="closed"]):not([aria-hidden="true"]),
-  [data-radix-menu-content][data-state="open"],
-  [data-radix-dropdown-menu-content][data-state="open"],
-  [data-radix-select-content][data-state="open"],
-  [data-radix-popover-content][data-state="open"],
-  [data-radix-popper-content-wrapper]:has([data-state="open"]) {
-    visibility: visible !important;
-    pointer-events: auto !important;
-  }
 
   html.chatgpt-multi-fullscreen-overlay,
   html.chatgpt-multi-fullscreen-overlay body,
@@ -1003,7 +989,7 @@ function refreshActivePaneVisuals() {
 
         if (isUsableWindow(workspaceWindow)) {
           workspaceWindow.setTitle(
-            `ChatGPT Multi Pane v4.5.4 Hotfix Beta — Active ${targetIndex + 1}/${appConfig.paneCount}`
+            `ChatGPT Multi Pane v4.5.4 Hotfix Beta 2 — Active ${targetIndex + 1}/${appConfig.paneCount}`
           );
         }
       });
@@ -1225,7 +1211,7 @@ function refreshActivePaneAndSidebar(
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.5.4 Hotfix Beta — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.5.4 Hotfix Beta 2 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
     );
   }
 
@@ -2454,7 +2440,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.5.4 Hotfix Beta — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.5.4 Hotfix Beta 2 — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {

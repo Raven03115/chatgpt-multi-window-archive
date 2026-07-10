@@ -35,7 +35,7 @@ try {
   }
 } catch (error) {
   console.error(
-    "[Bootstrap v4.5.4 Hotfix Beta] failed to create default layout config:",
+    "[Bootstrap v4.5.4 Hotfix Beta 2] failed to create default layout config:",
     error.message
   );
 }
