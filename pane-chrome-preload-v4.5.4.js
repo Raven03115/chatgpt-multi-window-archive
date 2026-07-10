@@ -1,5 +1,5 @@
 /*
- * ChatGPT Multi Pane v4.5.3
+ * ChatGPT Multi Pane v4.5.4
  * Early pane chrome guard.
  *
  * This runs before the page finishes loading. It uses only conservative

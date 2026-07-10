@@ -1010,7 +1010,7 @@ function refreshActivePaneVisuals() {
 
         if (isUsableWindow(workspaceWindow)) {
           workspaceWindow.setTitle(
-            `ChatGPT Multi Pane v4.5.4 Beta — Active ${targetIndex + 1}/${appConfig.paneCount}`
+            `ChatGPT Multi Pane v4.5.4 — Active ${targetIndex + 1}/${appConfig.paneCount}`
           );
         }
       });
@@ -1232,7 +1232,7 @@ function refreshActivePaneAndSidebar(
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.5.4 Beta — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.5.4 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
     );
   }
 
@@ -1692,7 +1692,7 @@ function createPaneView(
       partition: CHATGPT_PARTITION,
       preload: path.join(
         __dirname,
-        "pane-chrome-preload-v4.5.3.js"
+        "pane-chrome-preload-v4.5.4.js"
       ),
       nodeIntegration: false,
       contextIsolation: true,
@@ -2313,7 +2313,7 @@ function createSidebarOverlayWindow() {
 
       preload: path.join(
         __dirname,
-        "sidebar-shape-preload-v4.5.3.js"
+        "sidebar-shape-preload-v4.5.4.js"
       ),
 
       nodeIntegration: false,
@@ -2461,7 +2461,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.5.4 Beta — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.5.4 — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {
