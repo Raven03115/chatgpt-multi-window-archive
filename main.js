@@ -35,9 +35,9 @@ try {
   }
 } catch (error) {
   console.error(
-    "[Bootstrap v4.5.3] failed to create default layout config:",
+    "[Bootstrap v4.5.4 Beta] failed to create default layout config:",
     error.message
   );
 }
 
-require("./poc-shaped-sidebar-v4.5.3.js");
+require("./poc-shaped-sidebar-v4.5.4.js");
