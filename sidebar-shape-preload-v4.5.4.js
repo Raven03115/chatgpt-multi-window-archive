@@ -53,40 +53,16 @@ const OVERLAY_ISOLATION_CSS = `
     background-color: transparent !important;
   }
 
+  /*
+   * Hide only the conversation workspace root.
+   *
+   * Settings, search, menus and selects are portal layers outside the
+   * main workspace. Their official visibility state must remain intact.
+   */
   main,
-  main *,
-  [role="main"],
-  [role="main"] * {
+  [role="main"] {
     visibility: hidden !important;
     pointer-events: none !important;
-  }
-
-  [role="dialog"],
-  [role="dialog"] *,
-  [aria-modal="true"],
-  [aria-modal="true"] *,
-  [role="menu"],
-  [role="menu"] *,
-  [role="listbox"],
-  [role="listbox"] *,
-  [role="tooltip"],
-  [role="tooltip"] *,
-  [popover]:popover-open,
-  [popover]:popover-open *,
-  [data-radix-popper-content-wrapper],
-  [data-radix-popper-content-wrapper] *,
-  [data-radix-dialog-content],
-  [data-radix-dialog-content] *,
-  [data-radix-menu-content],
-  [data-radix-menu-content] *,
-  [data-radix-dropdown-menu-content],
-  [data-radix-dropdown-menu-content] *,
-  [data-radix-select-content],
-  [data-radix-select-content] *,
-  [data-radix-popover-content],
-  [data-radix-popover-content] * {
-    visibility: visible !important;
-    pointer-events: auto !important;
   }
 
   html.chatgpt-multi-fullscreen-overlay,
@@ -98,9 +74,7 @@ const OVERLAY_ISOLATION_CSS = `
   }
 
   html.chatgpt-multi-fullscreen-overlay main,
-  html.chatgpt-multi-fullscreen-overlay main *,
-  html.chatgpt-multi-fullscreen-overlay [role="main"],
-  html.chatgpt-multi-fullscreen-overlay [role="main"] * {
+  html.chatgpt-multi-fullscreen-overlay [role="main"] {
     visibility: visible !important;
     pointer-events: auto !important;
   }

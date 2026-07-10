@@ -989,7 +989,7 @@ function refreshActivePaneVisuals() {
 
         if (isUsableWindow(workspaceWindow)) {
           workspaceWindow.setTitle(
-            `ChatGPT Multi Pane v4.5.4 Hotfix Beta 2 — Active ${targetIndex + 1}/${appConfig.paneCount}`
+            `ChatGPT Multi Pane v4.5.4 Hotfix Beta 3 — Active ${targetIndex + 1}/${appConfig.paneCount}`
           );
         }
       });
@@ -1211,7 +1211,7 @@ function refreshActivePaneAndSidebar(
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.5.4 Hotfix Beta 2 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.5.4 Hotfix Beta 3 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
     );
   }
 
@@ -1371,20 +1371,36 @@ function handleSidebarNavigation(url) {
     return;
   }
 
-  /*
-   * A normal ChatGPT workspace destination always belongs in the
-   * active pane. Restore pane bounds first, even if ChatGPT briefly
-   * exposed a dialog-like wrapper during navigation.
-   */
-  if (completeOverlayWorkspaceSelection(url)) {
-    return;
-  }
+  const overlayWasActive =
+    overlayOnlyUiActive ||
+    Boolean(lockedDialogRect);
 
+  /*
+   * Native navigation emitted while Settings/Search is closing belongs
+   * to the sidebar overlay itself. Never forward it into the active
+   * conversation pane.
+   *
+   * Explicit user clicks still arrive through
+   * chatgpt-sidebar-route-intent and remain able to select a chat.
+   */
   if (shouldSuppressSidebarRouteForwarding()) {
     console.log(
       "[Integration v4.5.4] suppressed sidebar route:",
       url
     );
+
+    if (
+      overlayWasActive &&
+      isWorkspaceRouteUrl(url)
+    ) {
+      unlockDialogShape();
+    }
+
+    return;
+  }
+
+  if (completeOverlayWorkspaceSelection(url)) {
+    return;
   }
 }
 
@@ -2187,7 +2203,17 @@ function setManualExpanded(expanded) {
 function unlockDialogShape() {
   lockedDialogRect = null;
   overlayOnlyUiActive = false;
-  sidebarRouteForwardSuppressionUntil = 0;
+
+  /*
+   * Closing Settings/Search can make the sidebar overlay navigate back
+   * to its own conversation or home route. That navigation is not a
+   * user request to replace the active pane.
+   */
+  sidebarRouteForwardSuppressionUntil =
+    Math.max(
+      sidebarRouteForwardSuppressionUntil,
+      Date.now() + 1500
+    );
 
   suppressDialogLockUntil =
     Date.now() +
@@ -2440,7 +2466,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.5.4 Hotfix Beta 2 — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.5.4 Hotfix Beta 3 — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {
