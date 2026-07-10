@@ -166,6 +166,8 @@ const pendingPaneUrls = [];
 let activePaneIndex = 0;
 let activeVisualUpdateQueue = Promise.resolve();
 let renderedActivePaneIndex = null;
+let lastRefreshRequestAt = 0;
+const refreshInputHandlerTargets = new WeakSet();
 
 let appConfig = {
   paneCount: DEFAULT_PANE_COUNT,
@@ -1095,7 +1097,120 @@ function moveActivePaneVertical(direction) {
   setActivePane(targetIndex);
 }
 
-function refreshActivePaneAndSidebar() {
+function isRefreshShortcutInput(input) {
+  if (
+    !input ||
+    input.type !== "keyDown" ||
+    input.isAutoRepeat
+  ) {
+    return false;
+  }
+
+  return (
+    Boolean(input.control) &&
+    Boolean(input.alt) &&
+    !Boolean(input.shift) &&
+    !Boolean(input.meta) &&
+    String(input.key || "")
+      .toLowerCase() === "r"
+  );
+}
+
+function installRefreshShortcutInputHandler(
+  targetWebContents
+) {
+  if (
+    !targetWebContents ||
+    targetWebContents.isDestroyed() ||
+    refreshInputHandlerTargets.has(
+      targetWebContents
+    )
+  ) {
+    return;
+  }
+
+  refreshInputHandlerTargets.add(
+    targetWebContents
+  );
+
+  targetWebContents.on(
+    "before-input-event",
+    (event, input) => {
+      if (!isRefreshShortcutInput(input)) {
+        return;
+      }
+
+      event.preventDefault();
+
+      refreshActivePaneAndSidebar(
+        "focused-webcontents"
+      );
+    }
+  );
+}
+
+function reloadWebContentsFromCurrentUrl(
+  targetWebContents,
+  label
+) {
+  if (
+    !targetWebContents ||
+    targetWebContents.isDestroyed()
+  ) {
+    return false;
+  }
+
+  const currentUrl =
+    targetWebContents.getURL();
+
+  if (!currentUrl) {
+    return false;
+  }
+
+  try {
+    targetWebContents.stop();
+
+    targetWebContents
+      .loadURL(
+        currentUrl,
+        {
+          extraHeaders:
+            "Cache-Control: no-cache\r\n" +
+            "Pragma: no-cache"
+        }
+      )
+      .catch((error) => {
+        console.error(
+          `[Integration v4.5.4] ${label} reload failed:`,
+          error.message
+        );
+      });
+
+    return true;
+  } catch (error) {
+    console.error(
+      `[Integration v4.5.4] ${label} reload failed:`,
+      error.message
+    );
+
+    return false;
+  }
+}
+
+function refreshActivePaneAndSidebar(
+  source = "global-shortcut"
+) {
+  const now = Date.now();
+
+  if (
+    now - lastRefreshRequestAt <
+    500
+  ) {
+    return;
+  }
+
+  lastRefreshRequestAt = now;
+
   const paneIndex = activePaneIndex;
   const activeView = getActivePaneView();
 
@@ -1115,41 +1230,48 @@ function refreshActivePaneAndSidebar() {
   lastAppliedOverlayShapeSignature = "";
   applyOverlayShape();
 
+  if (isUsableWindow(workspaceWindow)) {
+    workspaceWindow.setTitle(
+      `ChatGPT Multi Pane v4.5.4 Beta — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+    );
+  }
+
+  let paneStarted = false;
+  let sidebarStarted = false;
+
   if (isUsableView(activeView)) {
     pendingPaneUrls[paneIndex] = null;
 
-    try {
-      activeView.webContents
-        .reloadIgnoringCache();
-
-      console.log(
-        `[Integration v4.5.4] refreshed pane=${paneIndex + 1}`
+    paneStarted =
+      reloadWebContentsFromCurrentUrl(
+        activeView.webContents,
+        `pane ${paneIndex + 1}`
       );
-    } catch (error) {
-      console.error(
-        "[Integration v4.5.4] active pane refresh failed:",
-        error.message
-      );
-    }
   }
 
   if (isUsableWindow(sidebarOverlayWindow)) {
     sidebarInitialLoadComplete = false;
 
-    try {
-      sidebarOverlayWindow.webContents
-        .reloadIgnoringCache();
-
-      console.log(
-        "[Integration v4.5.4] refreshed sidebar overlay"
+    sidebarStarted =
+      reloadWebContentsFromCurrentUrl(
+        sidebarOverlayWindow.webContents,
+        "sidebar overlay"
       );
-    } catch (error) {
-      console.error(
-        "[Integration v4.5.4] sidebar refresh failed:",
-        error.message
-      );
-    }
   }
+
+  console.log(
+    "[Integration v4.5.4] refresh requested:",
+    {
+      source,
+      pane: paneIndex + 1,
+      paneStarted,
+      sidebarStarted
+    }
+  );
+
+  setTimeout(() => {
+    refreshActivePaneVisuals();
+  }, 900);
 }
 
 function loadUrlInActivePane(url) {
@@ -1427,6 +1549,10 @@ function getPaneIndex(view) {
 function attachPaneEvents(view) {
   const resolveIndex = () =>
     getPaneIndex(view);
+
+  installRefreshShortcutInputHandler(
+    view.webContents
+  );
 
   view.webContents.on("focus", () => {
     const index = resolveIndex();
@@ -2197,6 +2323,10 @@ function createSidebarOverlayWindow() {
     }
   });
 
+  installRefreshShortcutInputHandler(
+    sidebarOverlayWindow.webContents
+  );
+
   sidebarOverlayWindow.webContents.on(
     "will-navigate",
     (event, url) => {
@@ -2340,6 +2470,10 @@ function createWorkspaceWindow() {
       sandbox: true
     }
   });
+
+  installRefreshShortcutInputHandler(
+    workspaceWindow.webContents
+  );
 
   workspaceWindow.loadURL("about:blank");
 
