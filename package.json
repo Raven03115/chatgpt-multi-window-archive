@@ -15,7 +15,8 @@
     "poc42": "electron poc-shaped-sidebar-v4.2.js",
     "poc43": "electron poc-shaped-sidebar-v4.3.js",
     "poc44": "electron poc-shaped-sidebar-v4.4.js",
-    "poc441": "electron poc-shaped-sidebar-v4.4.1.js"
+    "poc441": "electron poc-shaped-sidebar-v4.4.1.js",
+    "poc451": "electron poc-shaped-sidebar-v4.5.1.js"
   },
   "devDependencies": {
     "electron": "43.1.0"
