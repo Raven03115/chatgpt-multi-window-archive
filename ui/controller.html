@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatGPT Floating Workspace</title>
+  <link rel="stylesheet" href="./controller.css" />
+</head>
+<body>
+  <main class="controller">
+    <section class="top-row">
+      <div>
+        <div class="title">ChatGPT Floating Workspace</div>
+        <div class="subtitle">v5.0-A｜獨立視窗骨架測試</div>
+      </div>
+      <div id="statusText" class="status">正在讀取狀態…</div>
+    </section>
+
+    <section class="control-row">
+      <div class="control-group">
+        <span class="label">視窗數量</span>
+        <div id="paneCountButtons" class="button-strip"></div>
+      </div>
+
+      <div class="control-group">
+        <span class="label">模式</span>
+        <div class="button-strip">
+          <button type="button" data-mode="tiled">自動並排</button>
+          <button type="button" data-mode="floating">自由浮動</button>
+        </div>
+      </div>
+
+      <div class="control-group action-strip">
+        <button type="button" id="arrangeButton">重新排列</button>
+        <button type="button" id="lockButton">鎖定位置</button>
+        <button type="button" id="showAllButton">顯示全部</button>
+        <button type="button" id="hideAllButton">隱藏全部</button>
+      </div>
+    </section>
+
+    <section id="paneButtons" class="pane-row"></section>
+  </main>
+
+  <script src="./controller.js"></script>
+</body>
+</html>
