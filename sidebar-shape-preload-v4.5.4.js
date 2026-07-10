@@ -754,28 +754,30 @@ function isCloseControl(target) {
     return false;
   }
 
-  const text = [
-    control.getAttribute(
-      "aria-label"
-    ),
+  const metadata = [
+    control.getAttribute("aria-label"),
     control.getAttribute("title"),
-    control.getAttribute(
-      "data-testid"
-    ),
-    control.textContent
+    control.getAttribute("data-testid")
   ]
     .filter(Boolean)
     .join(" ")
     .trim()
     .toLowerCase();
 
+  const exactText = String(
+    control.textContent || ""
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
   return (
-    text === "x" ||
-    text === "×" ||
-    text.includes("close") ||
-    text.includes("dismiss") ||
-    text.includes("關閉") ||
-    text.includes("关闭")
+    exactText === "x" ||
+    exactText === "×" ||
+    metadata.includes("close") ||
+    metadata.includes("dismiss") ||
+    metadata.includes("關閉") ||
+    metadata.includes("关闭")
   );
 }
 
@@ -1001,23 +1003,51 @@ function isUpgradeControl(target) {
 }
 
 function isOverlayOnlyControl(target) {
-  const text = getControlText(target);
+  const control = getControlElement(target);
 
-  if (!text) {
+  if (!control) {
     return false;
   }
 
-  const overlayOnlyTokens = [
+  const normalize = (value) =>
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  const exactLabels = new Set([
     "設定",
     "settings",
     "搜尋對話",
+    "搜尋聊天",
     "search chats",
     "search conversations"
-  ];
+  ]);
 
-  return overlayOnlyTokens.some(
-    (token) => text === token ||
-      text.includes(token)
+  const semanticLabels = [
+    control.getAttribute("aria-label"),
+    control.getAttribute("title")
+  ]
+    .map(normalize)
+    .filter(Boolean);
+
+  const exactText = normalize(control.textContent);
+  const testId = normalize(
+    control.getAttribute("data-testid")
+  );
+
+  if (
+    semanticLabels.some((label) =>
+      exactLabels.has(label)
+    ) ||
+    exactLabels.has(exactText)
+  ) {
+    return true;
+  }
+
+  return (
+    /(?:^|[-_])(settings?|preferences?)(?:$|[-_])/.test(testId) ||
+    /(?:^|[-_])search(?:[-_](?:chats?|conversations?))?(?:$|[-_])/.test(testId)
   );
 }
 
@@ -1143,8 +1173,10 @@ function handleClick(event) {
     isOverlayOnlyControl(event.target)
   ) {
     notifyOverlayOnlyIntent();
-  } else {
-    interceptExternalRoute(event);
+  } else if (
+    !interceptExternalRoute(event)
+  ) {
+    reportRouteIntent(event.target);
   }
 
   scheduleReportBurst();
