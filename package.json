@@ -1,13 +1,13 @@
-﻿{
-  "name": "chatgpt-multi-window",
-  "version": "4.5.2",
-  "private": true,
-  "description": "Unofficial Windows multi-pane workspace for the official ChatGPT website",
-  "main": "main.js",
-  "scripts": {
-    "start": "electron ."
-  },
-  "devDependencies": {
-    "electron": "43.1.0"
-  }
+{
+    "name":  "chatgpt-multi-window",
+    "version":  "4.5.3-beta.1",
+    "private":  true,
+    "description":  "Unofficial Windows multi-pane workspace for the official ChatGPT website",
+    "main":  "main.js",
+    "scripts":  {
+                    "start":  "electron ."
+                },
+    "devDependencies":  {
+                            "electron":  "43.1.0"
+                        }
 }
