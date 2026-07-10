@@ -52,42 +52,37 @@ const OVERLAY_TRANSPARENCY_CSS = `
   }
 
   /*
-   * The overlay window contains a complete ChatGPT page.
-   * Hide its original conversation workspace while keeping
-   * the official sidebar and portalled menus/dialogs visible.
+   * Hide only the conversation workspace root.
+   *
+   * Do not force every descendant to visibility:hidden. ChatGPT keeps
+   * some closed select options mounted in the DOM, and those elements
+   * must retain their own official visibility state.
    */
   main,
-  main *,
-  [role="main"],
-  [role="main"] * {
+  [role="main"] {
     visibility: hidden !important;
     pointer-events: none !important;
   }
 
-  [role="dialog"],
-  [role="dialog"] *,
-  [aria-modal="true"],
-  [aria-modal="true"] *,
-  [role="menu"],
-  [role="menu"] *,
-  [role="listbox"],
-  [role="listbox"] *,
-  [role="tooltip"],
-  [role="tooltip"] *,
+  /*
+   * Reveal only active overlay roots.
+   *
+   * Descendants inherit normal visibility from the overlay root. Hidden
+   * options inside settings, selects and menus can therefore remain
+   * hidden instead of being forced visible by a broad "*“ selector.
+   */
+  [role="dialog"]:not([aria-hidden="true"]):not([hidden]),
+  [aria-modal="true"]:not([aria-hidden="true"]):not([hidden]),
   [popover]:popover-open,
-  [popover]:popover-open *,
-  [data-radix-popper-content-wrapper],
-  [data-radix-popper-content-wrapper] *,
-  [data-radix-dialog-content],
-  [data-radix-dialog-content] *,
-  [data-radix-menu-content],
-  [data-radix-menu-content] *,
-  [data-radix-dropdown-menu-content],
-  [data-radix-dropdown-menu-content] *,
-  [data-radix-select-content],
-  [data-radix-select-content] *,
-  [data-radix-popover-content],
-  [data-radix-popover-content] * {
+  [role="menu"][data-state="open"],
+  [role="listbox"][data-state="open"],
+  [role="tooltip"][data-state="open"],
+  [data-radix-dialog-content]:not([data-state="closed"]):not([aria-hidden="true"]),
+  [data-radix-menu-content][data-state="open"],
+  [data-radix-dropdown-menu-content][data-state="open"],
+  [data-radix-select-content][data-state="open"],
+  [data-radix-popover-content][data-state="open"],
+  [data-radix-popper-content-wrapper]:has([data-state="open"]) {
     visibility: visible !important;
     pointer-events: auto !important;
   }
@@ -101,9 +96,7 @@ const OVERLAY_TRANSPARENCY_CSS = `
   }
 
   html.chatgpt-multi-fullscreen-overlay main,
-  html.chatgpt-multi-fullscreen-overlay main *,
-  html.chatgpt-multi-fullscreen-overlay [role="main"],
-  html.chatgpt-multi-fullscreen-overlay [role="main"] * {
+  html.chatgpt-multi-fullscreen-overlay [role="main"] {
     visibility: visible !important;
     pointer-events: auto !important;
   }
@@ -1010,7 +1003,7 @@ function refreshActivePaneVisuals() {
 
         if (isUsableWindow(workspaceWindow)) {
           workspaceWindow.setTitle(
-            `ChatGPT Multi Pane v4.5.4 — Active ${targetIndex + 1}/${appConfig.paneCount}`
+            `ChatGPT Multi Pane v4.5.4 Hotfix Beta — Active ${targetIndex + 1}/${appConfig.paneCount}`
           );
         }
       });
@@ -1232,7 +1225,7 @@ function refreshActivePaneAndSidebar(
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.5.4 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.5.4 Hotfix Beta — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
     );
   }
 
@@ -2461,7 +2454,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.5.4 — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.5.4 Hotfix Beta — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {
