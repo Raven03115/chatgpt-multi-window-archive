@@ -18,6 +18,7 @@
 - 支援資料庫、排程、圖像、GPT、網站等官方頁面
 - 支援升級方案等全畫面頁面
 - 自動保存窗格數量與各窗格最後開啟的 ChatGPT 網址
+- 提供不顯示終端視窗的日常啟動檔
 - 不使用第三方 ChatGPT 平台
 
 ## v4.5.3 更新
@@ -94,25 +95,53 @@ npm install
 npm start
 ```
 
+完成第一次安裝後，日常使用可直接雙擊：
+
+```text
+start-chatgpt-multi-hidden.vbs
+```
+
+此啟動方式不會顯示 CMD 或 PowerShell 視窗。
+
 ### 方法二：下載 ZIP
 
 1. 點擊 GitHub 頁面上的 `Code`
 2. 選擇 `Download ZIP`
 3. 解壓縮檔案
 4. 確認電腦已安裝 Node.js
-5. 雙擊：
+5. 第一次使用時，雙擊：
 
 ```text
 start-chatgpt-multi.bat
 ```
 
-啟動檔會在第一次使用時自動執行 `npm install`。之後會直接啟動程式。
+啟動檔會在第一次使用時自動執行 `npm install`。安裝完成後，日常使用建議改為雙擊：
+
+```text
+start-chatgpt-multi-hidden.vbs
+```
+
+此啟動方式會直接啟動 Electron，不會保留終端視窗。
 
 也可以在專案資料夾開啟 PowerShell，手動執行：
 
 ```powershell
 npm install
 npm start
+```
+
+## 啟動方式說明
+
+| 啟動檔 | 用途 |
+|---|---|
+| `start-chatgpt-multi-hidden.vbs` | 日常啟動，不顯示終端視窗 |
+| `start-chatgpt-multi.bat` | 第一次安裝、更新依賴或查看錯誤訊息 |
+| `npm start` | 開發、測試或從 PowerShell 手動啟動 |
+
+若 `start-chatgpt-multi-hidden.vbs` 顯示找不到 Electron，請先執行一次：
+
+```powershell
+npm install
 ```
 
 ## 更新
@@ -124,6 +153,8 @@ git pull
 npm install
 npm start
 ```
+
+更新完成後，仍可使用 `start-chatgpt-multi-hidden.vbs` 日常啟動。
 
 使用 ZIP 下載者需要重新下載新版 ZIP。
 
