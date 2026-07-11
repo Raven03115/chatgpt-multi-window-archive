@@ -165,6 +165,8 @@ let suppressDialogLockUntil = 0;
 
 let overlaySyncTimer = null;
 let workspaceLayoutTimer = null;
+let paneCloseNoticeTimer = null;
+let paneCloseNoticeView = null;
 let sidebarInitialLoadComplete = false;
 
 let overlayOnlyUiActive = false;
@@ -1029,6 +1031,136 @@ function setActivePane(index) {
 
 function getActivePaneView() {
   return paneViews[activePaneIndex] || null;
+}
+
+function getPaneCloseNoticeScript(message) {
+  const serializedMessage =
+    JSON.stringify(message);
+
+  return `
+    (() => {
+      const NOTICE_ID =
+        "chatgpt-multi-pane-close-notice";
+
+      let notice =
+        document.getElementById(NOTICE_ID);
+
+      if (!notice) {
+        notice = document.createElement("div");
+        notice.id = NOTICE_ID;
+        notice.setAttribute("role", "status");
+        notice.setAttribute("aria-live", "polite");
+        notice.style.position = "fixed";
+        notice.style.top = "24px";
+        notice.style.left = "50%";
+        notice.style.transform = "translateX(-50%)";
+        notice.style.maxWidth = "calc(100vw - 48px)";
+        notice.style.padding = "10px 16px";
+        notice.style.border =
+          "1px solid rgba(255, 255, 255, 0.16)";
+        notice.style.borderRadius = "10px";
+        notice.style.background =
+          "rgba(153, 27, 27, 0.96)";
+        notice.style.color = "#f7f7f8";
+        notice.style.boxShadow =
+          "0 8px 24px rgba(0, 0, 0, 0.32)";
+        notice.style.boxSizing = "border-box";
+        notice.style.fontFamily =
+          "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        notice.style.fontSize = "14px";
+        notice.style.fontWeight = "600";
+        notice.style.lineHeight = "1.5";
+        notice.style.textAlign = "center";
+        notice.style.pointerEvents = "none";
+        notice.style.userSelect = "none";
+        notice.style.zIndex = "2147483647";
+
+        document.documentElement.appendChild(notice);
+      }
+
+      notice.textContent = ${serializedMessage};
+      return true;
+    })();
+  `;
+}
+
+function removePaneCloseNoticeFromView(view) {
+  if (!isUsableView(view)) {
+    return;
+  }
+
+  view.webContents
+    .executeJavaScript(
+      `
+        (() => {
+          document
+            .getElementById(
+              "chatgpt-multi-pane-close-notice"
+            )
+            ?.remove();
+          return true;
+        })();
+      `,
+      true
+    )
+    .catch(() => {
+      // The pane may be navigating or closing.
+    });
+}
+
+function clearPaneCloseNotice() {
+  if (paneCloseNoticeTimer) {
+    clearTimeout(paneCloseNoticeTimer);
+    paneCloseNoticeTimer = null;
+  }
+
+  const noticeView = paneCloseNoticeView;
+  paneCloseNoticeView = null;
+  removePaneCloseNoticeFromView(noticeView);
+}
+
+function showPaneCloseNotice(message) {
+  const targetView = getActivePaneView();
+
+  if (!isUsableView(targetView)) {
+    return;
+  }
+
+  if (paneCloseNoticeTimer) {
+    clearTimeout(paneCloseNoticeTimer);
+    paneCloseNoticeTimer = null;
+  }
+
+  if (
+    paneCloseNoticeView &&
+    paneCloseNoticeView !== targetView
+  ) {
+    removePaneCloseNoticeFromView(
+      paneCloseNoticeView
+    );
+  }
+
+  paneCloseNoticeView = targetView;
+
+  targetView.webContents
+    .executeJavaScript(
+      getPaneCloseNoticeScript(message),
+      true
+    )
+    .catch((error) => {
+      console.error(
+        "[Integration v4.5.5] pane close notice failed:",
+        error.message
+      );
+    });
+
+  paneCloseNoticeTimer = setTimeout(() => {
+    paneCloseNoticeTimer = null;
+
+    const noticeView = paneCloseNoticeView;
+    paneCloseNoticeView = null;
+    removePaneCloseNoticeFromView(noticeView);
+  }, 2500);
 }
 
 function moveActivePaneVertical(direction) {
@@ -2030,6 +2162,28 @@ function setPaneCount(targetCount) {
 function closeActivePane(
   source = "global-shortcut"
 ) {
+  const currentCount = paneViews.length;
+  const blockedMessage =
+    currentCount === 1
+      ? "至少需要保留 1 個窗格。"
+      : currentCount === 6
+        ? "6 格布局不支援單格關閉，請先移動要保留的窗格，再切換布局。"
+        : null;
+
+  if (blockedMessage) {
+    showPaneCloseNotice(blockedMessage);
+
+    console.log(
+      "[Integration v4.5.5] close pane blocked:",
+      {
+        source,
+        paneCount: currentCount
+      }
+    );
+
+    return;
+  }
+
   const now = Date.now();
 
   /*
@@ -2050,8 +2204,6 @@ function closeActivePane(
     return;
   }
 
-  const currentCount = paneViews.length;
-
   /*
    * 目前規格只允許：
    * 4 -> 3
@@ -2061,21 +2213,6 @@ function closeActivePane(
    * 1 格不可再關閉；
    * 6 格不可變成未正式支援的 5 格。
    */
-  if (
-    currentCount === 1 ||
-    currentCount === 6
-  ) {
-    console.log(
-      "[Integration v4.5.5] close pane blocked:",
-      {
-        source,
-        paneCount: currentCount
-      }
-    );
-
-    return;
-  }
-
   if (
     ![2, 3, 4].includes(currentCount) ||
     appConfig.paneCount !== currentCount
@@ -2810,6 +2947,8 @@ function createWorkspaceWindow() {
   });
 
   workspaceWindow.on("closed", () => {
+    clearPaneCloseNotice();
+
     if (isUsableWindow(sidebarOverlayWindow)) {
       sidebarOverlayWindow.destroy();
     }
@@ -3177,6 +3316,7 @@ app.whenReady().then(() => {
 });
 
 app.on("will-quit", () => {
+  clearPaneCloseNotice();
   saveOpenPaneUrls();
   saveConfigNow();
 
