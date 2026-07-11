@@ -146,7 +146,9 @@ let activePaneIndex = 0;
 let activeVisualUpdateQueue = Promise.resolve();
 let renderedActivePaneIndex = null;
 let lastRefreshRequestAt = 0;
+let lastClosePaneRequestAt = 0;
 const refreshInputHandlerTargets = new WeakSet();
+const closePaneInputHandlerTargets = new WeakSet();
 
 let appConfig = {
   paneCount: DEFAULT_PANE_COUNT,
@@ -1128,6 +1130,59 @@ function installRefreshShortcutInputHandler(
   );
 }
 
+
+function isClosePaneShortcutInput(input) {
+  if (
+    !input ||
+    input.type !== "keyDown" ||
+    input.isAutoRepeat
+  ) {
+    return false;
+  }
+
+  return (
+    Boolean(input.control) &&
+    Boolean(input.alt) &&
+    !Boolean(input.shift) &&
+    !Boolean(input.meta) &&
+    String(input.key || "")
+      .toLowerCase() === "w"
+  );
+}
+
+function installClosePaneShortcutInputHandler(
+  targetWebContents
+) {
+  if (
+    !targetWebContents ||
+    targetWebContents.isDestroyed() ||
+    closePaneInputHandlerTargets.has(
+      targetWebContents
+    )
+  ) {
+    return;
+  }
+
+  closePaneInputHandlerTargets.add(
+    targetWebContents
+  );
+
+  targetWebContents.on(
+    "before-input-event",
+    (event, input) => {
+      if (!isClosePaneShortcutInput(input)) {
+        return;
+      }
+
+      event.preventDefault();
+
+      closeActivePane(
+        "focused-webcontents"
+      );
+    }
+  );
+}
+
 function reloadWebContentsFromCurrentUrl(
   targetWebContents,
   label
@@ -1525,6 +1580,10 @@ function attachPaneEvents(view) {
     view.webContents
   );
 
+  installClosePaneShortcutInputHandler(
+    view.webContents
+  );
+
   view.webContents.on("focus", () => {
     const index = resolveIndex();
 
@@ -1883,6 +1942,157 @@ function setPaneCount(targetCount) {
 
     console.log(
       `[Integration v4.5.4.2] pane count=${nextCount}`
+    );
+  } finally {
+    setTimeout(() => {
+      paneCountChangeInProgress = false;
+    }, 150);
+  }
+}
+
+
+function closeActivePane(
+  source = "global-shortcut"
+) {
+  const now = Date.now();
+
+  /*
+   * 全域快捷鍵與 before-input-event
+   * 可能同時收到同一次按鍵，必須防止
+   * 一次關閉兩個窗格。
+   */
+  if (
+    now - lastClosePaneRequestAt <
+    500
+  ) {
+    return;
+  }
+
+  lastClosePaneRequestAt = now;
+
+  if (paneCountChangeInProgress) {
+    return;
+  }
+
+  const currentCount = paneViews.length;
+
+  /*
+   * 目前規格只允許：
+   * 4 -> 3
+   * 3 -> 2
+   * 2 -> 1
+   *
+   * 1 格不可再關閉；
+   * 6 格不可變成未正式支援的 5 格。
+   */
+  if (
+    currentCount === 1 ||
+    currentCount === 6
+  ) {
+    console.log(
+      "[Integration v4.5.5] close pane blocked:",
+      {
+        source,
+        paneCount: currentCount
+      }
+    );
+
+    return;
+  }
+
+  if (
+    ![2, 3, 4].includes(currentCount) ||
+    appConfig.paneCount !== currentCount
+  ) {
+    console.error(
+      "[Integration v4.5.5] close pane rejected because pane state is inconsistent:",
+      {
+        source,
+        viewCount: currentCount,
+        configuredCount:
+          appConfig.paneCount
+      }
+    );
+
+    return;
+  }
+
+  const closingIndex = Math.max(
+    0,
+    Math.min(
+      activePaneIndex,
+      currentCount - 1
+    )
+  );
+
+  paneCountChangeInProgress = true;
+
+  try {
+    dismissSidebarTransientUi();
+    saveOpenPaneUrls();
+
+    /*
+     * destroyPaneView() 只銷毀被選取的
+     * WebContentsView。其他窗格實體仍保留，
+     * 不會重新載入。
+     */
+    destroyPaneView(closingIndex);
+
+    /*
+     * 移除已銷毀的位置，讓後方既有窗格
+     * 向前補位。三個陣列必須同步位移。
+     */
+    paneViews.splice(
+      closingIndex,
+      1
+    );
+
+    pendingPaneUrls.splice(
+      closingIndex,
+      1
+    );
+
+    appConfig.paneUrls.splice(
+      closingIndex,
+      1
+    );
+
+    const nextCount =
+      currentCount - 1;
+
+    appConfig.paneCount =
+      nextCount;
+
+    /*
+     * 關閉中間格時，後方窗格補上原位置；
+     * 關閉最後一格時，改選新的最後一格。
+     */
+    activePaneIndex = Math.min(
+      closingIndex,
+      nextCount - 1
+    );
+
+    /*
+     * 原本的視覺索引已因陣列位移而失效，
+     * 重新建立活動窗格外框。
+     */
+    renderedActivePaneIndex = null;
+
+    saveConfigNow();
+    layoutPaneViews();
+    refreshActivePaneVisuals();
+
+    console.log(
+      "[Integration v4.5.5] active pane closed:",
+      {
+        source,
+        closedPane:
+          closingIndex + 1,
+        paneCount:
+          nextCount,
+        activePane:
+          activePaneIndex + 1
+      }
     );
   } finally {
     setTimeout(() => {
@@ -2310,6 +2520,10 @@ function createSidebarOverlayWindow() {
     sidebarOverlayWindow.webContents
   );
 
+  installClosePaneShortcutInputHandler(
+    sidebarOverlayWindow.webContents
+  );
+
   sidebarOverlayWindow.webContents.on(
     "will-navigate",
     (event, url) => {
@@ -2457,6 +2671,10 @@ function createWorkspaceWindow() {
   });
 
   installRefreshShortcutInputHandler(
+    workspaceWindow.webContents
+  );
+
+  installClosePaneShortcutInputHandler(
     workspaceWindow.webContents
   );
 
@@ -2608,6 +2826,14 @@ function registerShortcuts() {
     "CommandOrControl+Alt+Down",
     () => moveActivePaneVertical(1),
     "active-down"
+  );
+
+  registerShortcut(
+    "CommandOrControl+Alt+W",
+    () => closeActivePane(
+      "global-shortcut"
+    ),
+    "close-active-pane"
   );
 
   registerShortcut(
