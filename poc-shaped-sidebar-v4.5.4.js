@@ -1881,49 +1881,59 @@ function destroyPaneView(index) {
   paneViews[index] = null;
 }
 
-function promoteActivePaneToFirst() {
+function preserveActivePaneForReduction(
+  targetCount
+) {
   const selectedIndex = activePaneIndex;
 
   if (
-    selectedIndex <= 0 ||
+    !Number.isInteger(targetCount) ||
+    targetCount < 1 ||
+    targetCount >= paneViews.length ||
+    selectedIndex < targetCount ||
     selectedIndex >= paneViews.length
   ) {
-    activePaneIndex = 0;
-    renderedActivePaneIndex = null;
     return;
   }
+
+  const preservedIndex = targetCount - 1;
 
   const selectedView =
     paneViews[selectedIndex];
 
   paneViews[selectedIndex] =
-    paneViews[0];
+    paneViews[preservedIndex];
 
-  paneViews[0] = selectedView;
+  paneViews[preservedIndex] = selectedView;
 
   const selectedPendingUrl =
     pendingPaneUrls[selectedIndex];
 
   pendingPaneUrls[selectedIndex] =
-    pendingPaneUrls[0];
+    pendingPaneUrls[preservedIndex];
 
-  pendingPaneUrls[0] =
+  pendingPaneUrls[preservedIndex] =
     selectedPendingUrl;
 
   const selectedSavedUrl =
     appConfig.paneUrls[selectedIndex];
 
   appConfig.paneUrls[selectedIndex] =
-    appConfig.paneUrls[0];
+    appConfig.paneUrls[preservedIndex];
 
-  appConfig.paneUrls[0] =
+  appConfig.paneUrls[preservedIndex] =
     selectedSavedUrl;
 
-  activePaneIndex = 0;
+  activePaneIndex = preservedIndex;
   renderedActivePaneIndex = null;
 
   console.log(
-    "[Integration v4.5.4.2] promoted active pane to single-pane slot"
+    "[Integration v4.5.5] preserved active pane during layout reduction:",
+    {
+      sourceIndex: selectedIndex,
+      targetIndex: preservedIndex,
+      targetCount
+    }
   );
 }
 
@@ -1954,11 +1964,10 @@ function setPaneCount(targetCount) {
     dismissSidebarTransientUi();
     saveOpenPaneUrls();
 
-    if (
-      nextCount === 1 &&
-      currentCount > 1
-    ) {
-      promoteActivePaneToFirst();
+    if (nextCount < currentCount) {
+      preserveActivePaneForReduction(
+        nextCount
+      );
     }
 
     /*
