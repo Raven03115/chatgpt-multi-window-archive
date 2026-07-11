@@ -11,6 +11,13 @@ const {
 const fs = require("fs");
 const path = require("path");
 
+const {
+  classifyRoute
+} = require("./lib/route-policy.cjs");
+const {
+  createDiagnosticsLogger
+} = require("./lib/diagnostics.cjs");
+
 const CHATGPT_URL = "https://chatgpt.com";
 const CHATGPT_PARTITION = "persist:chatgpt-shared";
 
@@ -41,6 +48,9 @@ const USER_DATA_PATH = path.join(
 );
 
 app.setPath("userData", USER_DATA_PATH);
+
+const integrationDiagnostics =
+  createDiagnosticsLogger({ app });
 
 const OVERLAY_TRANSPARENCY_CSS = `
   html,
@@ -341,6 +351,32 @@ function isUsableView(view) {
     view.webContents &&
     !view.webContents.isDestroyed()
   );
+}
+
+function recordIntegrationEvent(event) {
+  try {
+    integrationDiagnostics.log(event);
+  } catch {
+    // Diagnostics must never interrupt application behavior.
+  }
+}
+
+function getDiagnosticRouteKind(url) {
+  return classifyRoute(url);
+}
+
+function getViewDiagnosticRouteKind(view) {
+  if (!isUsableView(view)) {
+    return "invalid";
+  }
+
+  try {
+    return getDiagnosticRouteKind(
+      view.webContents.getURL()
+    );
+  } catch {
+    return "invalid";
+  }
 }
 
 function isChatGPTUrl(url) {
@@ -1010,6 +1046,7 @@ function syncPaneVisualAfterNavigation(index) {
 }
 
 function setActivePane(index) {
+  const previousActivePaneIndex = activePaneIndex;
   const maximumIndex = Math.max(
     0,
     appConfig.paneCount - 1
@@ -1021,6 +1058,16 @@ function setActivePane(index) {
   );
 
   activePaneIndex = nextIndex;
+
+  if (activePaneIndex !== previousActivePaneIndex) {
+    recordIntegrationEvent({
+      event: "active-pane-changed",
+      pane: activePaneIndex + 1,
+      source: "pane-selection",
+      action: "selected",
+      reason: "active-pane-request"
+    });
+  }
 
   console.log(
     `[Integration v4.5.5] active pane=${activePaneIndex + 1}`
@@ -1502,6 +1549,16 @@ function refreshActivePaneAndSidebar(
     }
   );
 
+  recordIntegrationEvent({
+    event: "refresh-requested",
+    pane: paneIndex + 1,
+    routeKind: getViewDiagnosticRouteKind(activeView),
+    source,
+    action: "reload",
+    reason: "user-request",
+    stage: "requested"
+  });
+
   setTimeout(() => {
     refreshActivePaneVisuals();
   }, 900);
@@ -1530,6 +1587,9 @@ function loadUrlInActivePane(url) {
     return;
   }
 
+  const loadStartedAt = performance.now();
+  const routeKind = getDiagnosticRouteKind(url);
+
   console.log(
     `[Integration v4.5.5] load pane=${paneIndex + 1} url=${url}`
   );
@@ -1541,9 +1601,49 @@ function loadUrlInActivePane(url) {
 
   pendingPaneUrls[paneIndex] = url;
 
+  recordIntegrationEvent({
+    event: "pane-load-url",
+    pane: paneIndex + 1,
+    routeKind,
+    source: "sidebar-selection",
+    action: "started",
+    reason: "workspace-route",
+    stage: "load"
+  });
+
   activeView.webContents
     .loadURL(url)
+    .then(() => {
+      recordIntegrationEvent({
+        event: "pane-load-url",
+        pane: paneIndex + 1,
+        routeKind,
+        source: "sidebar-selection",
+        action: "completed",
+        reason: "load-url-resolved",
+        stage: "load",
+        elapsedMs: Math.round(
+          performance.now() - loadStartedAt
+        )
+      });
+    })
     .catch((error) => {
+      recordIntegrationEvent({
+        event: "pane-load-url",
+        pane: paneIndex + 1,
+        routeKind,
+        source: "sidebar-selection",
+        action: "failed",
+        reason: "load-url-rejected",
+        stage: "load",
+        elapsedMs: Math.round(
+          performance.now() - loadStartedAt
+        ),
+        errorName: error?.name || "Error",
+        sanitizedErrorMessage:
+          error?.message || "Unknown loadURL error"
+      });
+
       console.error(
         "[Integration v4.5.5] pane navigation failed:",
         error.message
@@ -1619,16 +1719,37 @@ function handleSidebarNavigation(url) {
   }
 
   if (isExternalAccountRouteUrl(url)) {
+    recordIntegrationEvent({
+      event: "sidebar-route-handled",
+      routeKind: getDiagnosticRouteKind(url),
+      source: "native-navigation",
+      action: "open-external-route",
+      reason: "external-account-route"
+    });
     openFullscreenAccountRoute(url);
     return;
   }
 
   if (isOverlayOnlyRouteUrl(url)) {
+    recordIntegrationEvent({
+      event: "sidebar-route-handled",
+      routeKind: getDiagnosticRouteKind(url),
+      source: "native-navigation",
+      action: "keep-in-overlay",
+      reason: "overlay-only-route"
+    });
     setOverlayOnlyUiActive(true);
     return;
   }
 
   if (isWorkspaceRouteUrl(url)) {
+    recordIntegrationEvent({
+      event: "sidebar-route-ignored",
+      routeKind: getDiagnosticRouteKind(url),
+      source: "native-navigation",
+      action: "ignore-native-route",
+      reason: "workspace-route-without-intent"
+    });
     console.log(
       "[Integration v4.5.5] native sidebar route ignored:",
       url
@@ -1853,6 +1974,24 @@ function attachPaneEvents(view) {
       updatePaneUrl(index, url);
       installPaneUi(view);
       syncPaneVisualAfterNavigation(index);
+    }
+  );
+
+  view.webContents.on(
+    "render-process-gone",
+    (_event, details) => {
+      const index = resolveIndex();
+
+      recordIntegrationEvent({
+        event: "pane-renderer-gone",
+        pane: index >= 0 ? index + 1 : undefined,
+        source: "pane",
+        action: "failed",
+        reason: "renderer-gone",
+        stage: "renderer",
+        errorName: details?.reason,
+        sanitizedErrorMessage: details?.exitCode
+      });
     }
   );
 
@@ -2848,6 +2987,15 @@ function createSidebarOverlayWindow() {
   sidebarOverlayWindow.webContents.on(
     "render-process-gone",
     (_event, details) => {
+      recordIntegrationEvent({
+        event: "sidebar-renderer-gone",
+        source: "sidebar",
+        action: "failed",
+        reason: "renderer-gone",
+        stage: "renderer",
+        errorName: details?.reason,
+        sanitizedErrorMessage: details?.exitCode
+      });
       console.error(
         "[Integration v4.5.5] sidebar renderer stopped:",
         details
@@ -3177,6 +3325,12 @@ ipcMain.on(
       fullscreenOverlayMode;
 
     if (!hadOverlayDialog) {
+      recordIntegrationEvent({
+        event: "sidebar-dialog-close-intent",
+        source: "dialog-close-intent",
+        action: "ignored",
+        reason: "no-overlay-dialog"
+      });
       console.log(
         "[Integration v4.5.5] ignored stray dialog close intent"
       );
@@ -3184,6 +3338,12 @@ ipcMain.on(
       return;
     }
 
+    recordIntegrationEvent({
+      event: "sidebar-dialog-close-intent",
+      source: "dialog-close-intent",
+      action: "close-overlay-dialog",
+      reason: "confirmed-overlay-dialog"
+    });
     unlockDialogShape(true);
 
     if (fullscreenOverlayMode) {
@@ -3208,21 +3368,64 @@ ipcMain.on(
       return;
     }
 
+    const routeKind = getDiagnosticRouteKind(url);
+
+    recordIntegrationEvent({
+      event: "sidebar-route-intent",
+      pane: activePaneIndex + 1,
+      routeKind,
+      source: "anchor-intent",
+      action: "received",
+      reason: "explicit-anchor-click"
+    });
+
     if (isExternalAccountRouteUrl(url)) {
+      recordIntegrationEvent({
+        event: "sidebar-route-handled",
+        pane: activePaneIndex + 1,
+        routeKind,
+        source: "anchor-intent",
+        action: "open-external-route",
+        reason: "external-account-route"
+      });
       openFullscreenAccountRoute(url);
       return;
     }
 
     if (isOverlayOnlyRouteUrl(url)) {
+      recordIntegrationEvent({
+        event: "sidebar-route-handled",
+        pane: activePaneIndex + 1,
+        routeKind,
+        source: "anchor-intent",
+        action: "keep-in-overlay",
+        reason: "overlay-only-route"
+      });
       setOverlayOnlyUiActive(true);
       return;
     }
 
     if (completeOverlayWorkspaceSelection(url)) {
+      recordIntegrationEvent({
+        event: "sidebar-route-forwarded",
+        pane: activePaneIndex + 1,
+        routeKind,
+        source: "anchor-intent",
+        action: "forward-to-active-pane",
+        reason: "explicit-workspace-selection"
+      });
       return;
     }
 
     if (shouldSuppressSidebarRouteForwarding()) {
+      recordIntegrationEvent({
+        event: "sidebar-route-suppressed",
+        pane: activePaneIndex + 1,
+        routeKind,
+        source: "anchor-intent",
+        action: "ignore-duplicate-route",
+        reason: "duplicate-route-guard"
+      });
       console.log(
         "[Integration v4.5.5] suppressed sidebar route intent:",
         url
