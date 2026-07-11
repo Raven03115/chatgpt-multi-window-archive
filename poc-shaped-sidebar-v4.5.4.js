@@ -1078,6 +1078,73 @@ function moveActivePaneVertical(direction) {
   setActivePane(targetIndex);
 }
 
+function moveActivePanePosition(direction) {
+  const currentIndex = activePaneIndex;
+  const targetIndex =
+    currentIndex + direction;
+  const directionLabel =
+    direction === -1
+      ? "left"
+      : direction === 1
+        ? "right"
+        : "unknown";
+
+  if (
+    (direction !== -1 && direction !== 1) ||
+    targetIndex < 0 ||
+    targetIndex >= paneViews.length
+  ) {
+    console.log(
+      "[Integration v4.5.5] active pane move no-op:",
+      {
+        sourceIndex: currentIndex,
+        targetIndex,
+        direction: directionLabel
+      }
+    );
+    return;
+  }
+
+  const activeView =
+    paneViews[currentIndex];
+
+  paneViews[currentIndex] =
+    paneViews[targetIndex];
+  paneViews[targetIndex] = activeView;
+
+  const activePendingUrl =
+    pendingPaneUrls[currentIndex];
+
+  pendingPaneUrls[currentIndex] =
+    pendingPaneUrls[targetIndex];
+  pendingPaneUrls[targetIndex] =
+    activePendingUrl;
+
+  const activeSavedUrl =
+    appConfig.paneUrls[currentIndex];
+
+  appConfig.paneUrls[currentIndex] =
+    appConfig.paneUrls[targetIndex];
+  appConfig.paneUrls[targetIndex] =
+    activeSavedUrl;
+
+  activePaneIndex = targetIndex;
+  renderedActivePaneIndex = null;
+
+  saveConfigNow();
+  layoutPaneViews();
+  refreshActivePaneVisuals();
+
+  console.log(
+    "[Integration v4.5.5] active pane moved:",
+    {
+      sourceIndex: currentIndex,
+      targetIndex,
+      direction: directionLabel
+    }
+  );
+}
+
 function isRefreshShortcutInput(input) {
   if (
     !input ||
@@ -2814,6 +2881,18 @@ function registerShortcuts() {
       activePaneIndex + 1
     ),
     "active-right"
+  );
+
+  registerShortcut(
+    "CommandOrControl+Alt+Shift+Left",
+    () => moveActivePanePosition(-1),
+    "move-active-left"
+  );
+
+  registerShortcut(
+    "CommandOrControl+Alt+Shift+Right",
+    () => moveActivePanePosition(1),
+    "move-active-right"
   );
 
   registerShortcut(
