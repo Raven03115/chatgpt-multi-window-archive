@@ -1,4 +1,4 @@
-# ChatGPT Multi Pane v4.5.5
+# ChatGPT Multi Pane v4.5.6
 
 非官方的 Windows 多窗格 ChatGPT 工作區。
 
@@ -18,6 +18,8 @@
 - 縮減布局時會自動保留目前活動窗格
 - 無法關閉窗格時會顯示不搶焦點的非阻塞提示
 - 從左側歷史對話將內容載入目前窗格
+- 從 Project 建立新對話時，會將新對話載入目前活動窗格
+- 提供隱私安全的本機診斷日誌與路由回歸測試
 - 支援官方搜尋對話與設定視窗
 - 支援資料庫、排程、圖像、GPT、網站等官方頁面
 - 支援升級方案等全畫面頁面
@@ -183,6 +185,14 @@ npm start
 
 下載這個專案不會取得作者的帳號、Cookie、對話或個人設定。本程式本身也不會把你的登入資料上傳到此 GitHub Repository。
 
+診斷日誌保存在：
+
+```text
+%APPDATA%\chatgpt-multi-window\logs\integration-events.jsonl
+```
+
+診斷日誌採欄位白名單，不記錄完整 URL、Project ID、對話 ID、對話內容、Cookie 或 Token。日誌檔案最大為 2 MB，超過後會自動輪替。
+
 ## 移除
 
 1. 關閉程式
@@ -222,6 +232,6 @@ npm start
 
 ## 版本
 
-目前公開穩定版：`v4.5.5`
+目前公開穩定版：`v4.5.6`
 
 完整版本歷史請見 [`CHANGELOG.md`](CHANGELOG.md)。
