@@ -1,19 +1,125 @@
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
   classifyRoute,
-  decideSidebarRouting
+  decideProjectActionCandidate,
+  decideSidebarRouting,
+  isProjectActionIntentValid
 } = require("../lib/route-policy.cjs");
+
+const TEST_NOW = 10_000;
+
+function createProjectIntent(overrides = {}) {
+  return {
+    paneIndex: 2,
+    generation: 7,
+    createdAt: TEST_NOW - 100,
+    consumed: false,
+    ...overrides
+  };
+}
+
+test("a role-button resolved from an SVG or path target is an eligible candidate", () => {
+  const result = decideProjectActionCandidate({
+    phase: "pointerdown",
+    targetKind: "path",
+    controlKind: "role-button",
+    hasAnchor: false,
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  });
+
+  assertAction(result, "create-project-intent");
+});
+
+test("sidebar preload resolves nested targets through the full actionable-control selector", () => {
+  const preloadSource = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "sidebar-shape-preload-v4.5.4.js"
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    preloadSource,
+    /return target\.closest\(\s*'a\[href\], button, \[role="button"\], \[role="menuitem"\]'\s*\)/
+  );
+});
+
+test("pointerdown creates a candidate while its following click never clears it", () => {
+  const input = {
+    controlKind: "button",
+    hasAnchor: false,
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  };
+  const pointerResult = decideProjectActionCandidate({
+    ...input,
+    phase: "pointerdown"
+  });
+  const clickResult = decideProjectActionCandidate({
+    ...input,
+    phase: "click"
+  });
+
+  assertAction(pointerResult, "create-project-intent");
+  assertAction(clickResult, "ignore-control");
+  assert.notEqual(clickResult.action, "clear-project-intent");
+});
+
+test("Settings, dialogs, anchors, backdrops, close, and external controls never create candidates", () => {
+  const base = {
+    phase: "pointerdown",
+    controlKind: "menuitem",
+    hasAnchor: false,
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  };
+
+  for (const excluded of [
+    { hasAnchor: true },
+    { insideDialog: true },
+    { overlayState: "settings" },
+    { overlayState: "search" },
+    { overlayControl: true },
+    { closeControl: true },
+    { externalControl: true },
+    { backdropControl: true }
+  ]) {
+    assertAction(
+      decideProjectActionCandidate({
+        ...base,
+        ...excluded
+      }),
+      "ignore-control"
+    );
+  }
+});
 
 function decide(overrides = {}) {
   return decideSidebarRouting({
     routeKind: "conversation",
     source: "anchor-intent",
     overlayState: "closed",
-    explicitProjectActionIntent: false,
     suppressionActive: false,
     activePaneValid: true,
     ...overrides
@@ -57,13 +163,25 @@ test("Search remains in the overlay", () => {
 });
 
 test("Settings background close clears Project intent and never forwards", () => {
-  const result = decide({
+  const closeResult = decide({
     routeKind: "unknown-workspace",
     source: "dialog-close",
     overlayState: "settings",
-    explicitProjectActionIntent: true
+    projectActionIntent: createProjectIntent(),
+    activePaneIndex: 2,
+    now: TEST_NOW
   });
-  assertAction(result, "clear-project-intent");
+  const followingNativeResult = decide({
+    routeKind: "conversation",
+    source: "native-navigation",
+    overlayState: "closed",
+    projectActionIntent: null,
+    activePaneIndex: 2,
+    now: TEST_NOW
+  });
+
+  assertAction(closeResult, "clear-project-intent");
+  assertAction(followingNativeResult, "ignore-native-route");
 });
 
 test("native Project workspace without explicit intent is ignored", () => {
@@ -77,30 +195,151 @@ test("native Project workspace without explicit intent is ignored", () => {
 });
 
 test("native Project workspace with one-time explicit intent forwards", () => {
+  for (const routeKind of [
+    "project-workspace",
+    "project-conversation"
+  ]) {
+    assertAction(
+      decide({
+        routeKind,
+        source: "native-navigation",
+        projectActionIntent: createProjectIntent(),
+        activePaneIndex: 2,
+        currentProjectIntentGeneration: 7,
+        now: TEST_NOW
+      }),
+      "forward-to-pane"
+    );
+  }
+});
+
+test("consumed Project intent cannot forward a second native route", () => {
+  const intent = createProjectIntent();
+  const first = decide({
+    routeKind: "project-workspace",
+    source: "native-navigation",
+    projectActionIntent: intent,
+    activePaneIndex: 2,
+    currentProjectIntentGeneration: 7,
+    now: TEST_NOW
+  });
+  const second = decide({
+    routeKind: "project-workspace",
+    source: "native-navigation",
+    projectActionIntent: {
+      ...intent,
+      consumed: true
+    },
+    activePaneIndex: 2,
+    currentProjectIntentGeneration: 7,
+    now: TEST_NOW
+  });
+
+  assertAction(first, "forward-to-pane");
+  assertAction(second, "ignore-native-route");
+});
+
+test("Project intent is valid only for its pane, generation, lifetime, and unused state", () => {
+  assert.equal(
+    isProjectActionIntentValid(
+      createProjectIntent(),
+      {
+        activePaneIndex: 2,
+        currentGeneration: 7,
+        now: TEST_NOW
+      }
+    ),
+    true
+  );
+
+  for (const invalidState of [
+    {
+      activePaneIndex: 1,
+      currentGeneration: 7,
+      now: TEST_NOW
+    },
+    {
+      activePaneIndex: 2,
+      currentGeneration: 8,
+      now: TEST_NOW
+    },
+    {
+      activePaneIndex: 2,
+      currentGeneration: 7,
+      now: TEST_NOW + 1_001
+    }
+  ]) {
+    assert.equal(
+      isProjectActionIntentValid(
+        createProjectIntent(),
+        invalidState
+      ),
+      false
+    );
+  }
+
+  assert.equal(
+    isProjectActionIntentValid(
+      createProjectIntent({ consumed: true }),
+      {
+        activePaneIndex: 2,
+        currentGeneration: 7,
+        now: TEST_NOW
+      }
+    ),
+    false
+  );
+
+  assert.equal(
+    isProjectActionIntentValid(
+      createProjectIntent({ paneIndex: -1 }),
+      {
+        activePaneIndex: -1,
+        currentGeneration: 7,
+        now: TEST_NOW
+      }
+    ),
+    false
+  );
+});
+
+test("Project intent never forwards an ordinary native conversation", () => {
+  assertAction(
+    decide({
+      routeKind: "conversation",
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 2,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    }),
+    "ignore-native-route"
+  );
+});
+
+test("Project intent cannot forward after the active pane changes", () => {
+  assertAction(
+    decide({
+      routeKind: "project-workspace",
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 1,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    }),
+    "ignore-native-route"
+  );
+});
+
+test("a bare boolean cannot bypass Project intent validation", () => {
   assertAction(
     decide({
       routeKind: "project-workspace",
       source: "native-navigation",
       explicitProjectActionIntent: true
     }),
-    "forward-to-pane"
+    "ignore-native-route"
   );
-});
-
-test("consumed Project intent cannot forward a second native route", () => {
-  const first = decide({
-    routeKind: "project-workspace",
-    source: "native-navigation",
-    explicitProjectActionIntent: true
-  });
-  const second = decide({
-    routeKind: "project-workspace",
-    source: "native-navigation",
-    explicitProjectActionIntent: false
-  });
-
-  assertAction(first, "forward-to-pane");
-  assertAction(second, "ignore-native-route");
 });
 
 test("suppression guard ignores a duplicate route", () => {
@@ -108,6 +347,22 @@ test("suppression guard ignores a duplicate route", () => {
     decide({ suppressionActive: true }),
     "ignore-duplicate"
   );
+});
+
+test("anchor selection forwards once and its following native event is suppressed", () => {
+  const anchorResult = decide({
+    routeKind: "project-conversation",
+    source: "anchor-intent",
+    suppressionActive: false
+  });
+  const nativeResult = decide({
+    routeKind: "project-conversation",
+    source: "native-navigation",
+    suppressionActive: true
+  });
+
+  assertAction(anchorResult, "forward-to-pane");
+  assertAction(nativeResult, "ignore-duplicate");
 });
 
 test("external account, upgrade, and billing routes stay out of panes", () => {

@@ -927,6 +927,84 @@ function reportRouteIntent(target) {
   );
 }
 
+function isLargeBackdropLikeControl(control) {
+  try {
+    const rect = control.getBoundingClientRect();
+
+    return (
+      rect.width >= window.innerWidth * 0.5 &&
+      rect.height >= window.innerHeight * 0.5
+    );
+  } catch {
+    return true;
+  }
+}
+
+function getControlKind(control) {
+  if (control.matches("a[href]")) {
+    return "anchor";
+  }
+
+  if (control.tagName.toLowerCase() === "button") {
+    return "button";
+  }
+
+  const role = String(
+    control.getAttribute("role") || ""
+  ).toLowerCase();
+
+  if (role === "button") {
+    return "role-button";
+  }
+
+  if (role === "menuitem") {
+    return "menuitem";
+  }
+
+  return "other";
+}
+
+function reportProjectActionCandidate(target) {
+  const control = getControlElement(target);
+
+  if (!control) {
+    return false;
+  }
+
+  const hasAnchor =
+    control.matches("a[href]") ||
+    Boolean(control.closest("a[href]"));
+
+  if (hasAnchor) {
+    return false;
+  }
+
+  const insideDialog = Boolean(
+    control.closest(DIALOG_ANCESTOR_SELECTOR)
+  );
+
+  ipcRenderer.send(
+    "chatgpt-sidebar-project-action-candidate",
+    {
+      phase: "pointerdown",
+      controlKind: getControlKind(control),
+      hasAnchor,
+      insideDialog,
+      overlayState: insideDialog
+        ? "dialog"
+        : "closed",
+      overlayControl:
+        isOverlayOnlyControl(control),
+      closeControl: isCloseControl(control),
+      externalControl: isUpgradeControl(control),
+      backdropControl:
+        isLargeBackdropLikeControl(control)
+    }
+  );
+
+  return true;
+}
+
 function interceptExternalRoute(event) {
   const url =
     getAnchorUrl(event.target);
@@ -1152,6 +1230,10 @@ function handlePointerDown(event) {
     isOverlayOnlyControl(event.target)
   ) {
     notifyOverlayOnlyIntent();
+  } else if (
+    reportProjectActionCandidate(event.target)
+  ) {
+    // Native ChatGPT routing will provide the final Project URL.
   } else if (
     !interceptExternalRoute(event)
   ) {

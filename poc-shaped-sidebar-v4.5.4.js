@@ -12,7 +12,10 @@ const fs = require("fs");
 const path = require("path");
 
 const {
-  classifyRoute
+  PROJECT_ACTION_INTENT_MAX_AGE_MS,
+  classifyRoute,
+  decideProjectActionCandidate,
+  decideSidebarRouting
 } = require("./lib/route-policy.cjs");
 const {
   createDiagnosticsLogger
@@ -184,6 +187,9 @@ let fullscreenOverlayMode = false;
 let sidebarRouteForwardSuppressionUntil = 0;
 let panesSuppressedForOverlay = false;
 let lastAppliedOverlayShapeSignature = "";
+let projectActionIntent = null;
+let projectActionIntentGeneration = 0;
+let projectActionIntentTimer = null;
 
 function getConfigPath() {
   return path.join(
@@ -377,6 +383,103 @@ function getViewDiagnosticRouteKind(view) {
   } catch {
     return "invalid";
   }
+}
+
+function clearProjectActionIntent(
+  reason,
+  expectedGeneration = null
+) {
+  if (
+    !projectActionIntent ||
+    (
+      expectedGeneration !== null &&
+      projectActionIntent.generation !== expectedGeneration
+    )
+  ) {
+    return false;
+  }
+
+  const clearedIntent = projectActionIntent;
+  projectActionIntent = null;
+
+  if (projectActionIntentTimer) {
+    clearTimeout(projectActionIntentTimer);
+    projectActionIntentTimer = null;
+  }
+
+  recordIntegrationEvent({
+    event: "project-intent-cleared",
+    pane: clearedIntent.paneIndex + 1,
+    routeKind: "project-workspace",
+    source: "project-action-intent",
+    action: "clear-project-intent",
+    reason
+  });
+
+  return true;
+}
+
+function createProjectActionIntent() {
+  clearProjectActionIntent("replaced-by-new-intent");
+
+  sidebarRouteForwardSuppressionUntil = 0;
+
+  projectActionIntentGeneration += 1;
+
+  const generation = projectActionIntentGeneration;
+  const paneIndex = activePaneIndex;
+
+  projectActionIntent = {
+    paneIndex,
+    generation,
+    createdAt: performance.now(),
+    consumed: false
+  };
+
+  projectActionIntentTimer = setTimeout(() => {
+    clearProjectActionIntent(
+      "intent-timeout",
+      generation
+    );
+  }, PROJECT_ACTION_INTENT_MAX_AGE_MS);
+
+  recordIntegrationEvent({
+    event: "project-intent-created",
+    pane: paneIndex + 1,
+    routeKind: "project-workspace",
+    source: "project-action-intent",
+    action: "create-project-intent",
+    reason: "explicit-non-anchor-project-action"
+  });
+}
+
+function consumeProjectActionIntent(routeKind) {
+  if (!projectActionIntent) {
+    return null;
+  }
+
+  const consumedIntent = {
+    ...projectActionIntent,
+    consumed: true
+  };
+
+  projectActionIntent = null;
+
+  if (projectActionIntentTimer) {
+    clearTimeout(projectActionIntentTimer);
+    projectActionIntentTimer = null;
+  }
+
+  recordIntegrationEvent({
+    event: "project-intent-consumed",
+    pane: consumedIntent.paneIndex + 1,
+    routeKind,
+    source: "project-action-intent",
+    action: "consume-project-intent",
+    reason: "matching-native-project-route"
+  });
+
+  return consumedIntent;
 }
 
 function isChatGPTUrl(url) {
@@ -1060,6 +1163,8 @@ function setActivePane(index) {
   activePaneIndex = nextIndex;
 
   if (activePaneIndex !== previousActivePaneIndex) {
+    clearProjectActionIntent("active-pane-changed");
+
     recordIntegrationEvent({
       event: "active-pane-changed",
       pane: activePaneIndex + 1,
@@ -1284,6 +1389,8 @@ function moveActivePanePosition(direction) {
     return;
   }
 
+  clearProjectActionIntent("pane-position-moved");
+
   const activeView =
     paneViews[currentIndex];
 
@@ -1490,6 +1597,7 @@ function refreshActivePaneAndSidebar(
   }
 
   lastRefreshRequestAt = now;
+  clearProjectActionIntent("refresh-requested");
 
   const paneIndex = activePaneIndex;
   const activeView = getActivePaneView();
@@ -1719,6 +1827,8 @@ function handleSidebarNavigation(url) {
   }
 
   if (isExternalAccountRouteUrl(url)) {
+    clearProjectActionIntent("external-route-opened");
+
     recordIntegrationEvent({
       event: "sidebar-route-handled",
       routeKind: getDiagnosticRouteKind(url),
@@ -1731,6 +1841,8 @@ function handleSidebarNavigation(url) {
   }
 
   if (isOverlayOnlyRouteUrl(url)) {
+    clearProjectActionIntent("overlay-only-route-opened");
+
     recordIntegrationEvent({
       event: "sidebar-route-handled",
       routeKind: getDiagnosticRouteKind(url),
@@ -1743,13 +1855,73 @@ function handleSidebarNavigation(url) {
   }
 
   if (isWorkspaceRouteUrl(url)) {
+    const routeKind = getDiagnosticRouteKind(url);
+    const decision = decideSidebarRouting({
+      routeKind,
+      source: "native-navigation",
+      overlayState:
+        overlayOnlyUiActive || Boolean(lockedDialogRect)
+          ? "dialog"
+          : "closed",
+      projectActionIntent,
+      activePaneIndex,
+      currentProjectIntentGeneration:
+        projectActionIntentGeneration,
+      now: performance.now(),
+      suppressionActive:
+        shouldSuppressSidebarRouteForwarding(),
+      activePaneValid:
+        isUsableView(getActivePaneView())
+    });
+    let nativeRouteReason = decision.reason;
+
+    if (decision.action === "ignore-duplicate") {
+      recordIntegrationEvent({
+        event: "duplicate-suppressed",
+        pane: activePaneIndex + 1,
+        routeKind,
+        source: "native-navigation",
+        action: decision.action,
+        reason: decision.reason
+      });
+
+      return;
+    }
+
+    if (decision.action === "forward-to-pane") {
+      const consumedIntent =
+        consumeProjectActionIntent(routeKind);
+
+      if (
+        consumedIntent &&
+        consumedIntent.paneIndex === activePaneIndex &&
+        completeOverlayWorkspaceSelection(url)
+      ) {
+        recordIntegrationEvent({
+          event: "route-forwarded",
+          pane: activePaneIndex + 1,
+          routeKind,
+          source: "native-navigation",
+          action: decision.action,
+          reason: decision.reason
+        });
+
+        return;
+      }
+
+      nativeRouteReason =
+        "workspace-forwarding-unavailable";
+    }
+
     recordIntegrationEvent({
-      event: "sidebar-route-ignored",
-      routeKind: getDiagnosticRouteKind(url),
+      event: "native-route-ignored",
+      pane: activePaneIndex + 1,
+      routeKind,
       source: "native-navigation",
       action: "ignore-native-route",
-      reason: "workspace-route-without-intent"
+      reason: nativeRouteReason
     });
+
     console.log(
       "[Integration v4.5.5] native sidebar route ignored:",
       url
@@ -1768,6 +1940,10 @@ function handleSidebarNavigation(url) {
 
 function setOverlayOnlyUiActive(active) {
   overlayOnlyUiActive = Boolean(active);
+
+  if (overlayOnlyUiActive) {
+    clearProjectActionIntent("overlay-state-activated");
+  }
 
   /*
    * Do not start a route guard merely because shape detection found a
@@ -1981,6 +2157,15 @@ function attachPaneEvents(view) {
     "render-process-gone",
     (_event, details) => {
       const index = resolveIndex();
+
+      if (
+        projectActionIntent &&
+        projectActionIntent.paneIndex === index
+      ) {
+        clearProjectActionIntent(
+          "target-pane-renderer-gone"
+        );
+      }
 
       recordIntegrationEvent({
         event: "pane-renderer-gone",
@@ -2229,6 +2414,8 @@ function setPaneCount(targetCount) {
     return;
   }
 
+  clearProjectActionIntent("pane-count-changed");
+
   paneCountChangeInProgress = true;
 
   try {
@@ -2377,6 +2564,8 @@ function closeActivePane(
     )
   );
 
+  clearProjectActionIntent("active-pane-closed");
+
   paneCountChangeInProgress = true;
 
   try {
@@ -2454,6 +2643,7 @@ function closeActivePane(
 }
 
 function destroyPaneViews() {
+  clearProjectActionIntent("pane-views-destroyed");
   saveOpenPaneUrls();
 
   for (
@@ -2987,6 +3177,8 @@ function createSidebarOverlayWindow() {
   sidebarOverlayWindow.webContents.on(
     "render-process-gone",
     (_event, details) => {
+      clearProjectActionIntent("sidebar-renderer-gone");
+
       recordIntegrationEvent({
         event: "sidebar-renderer-gone",
         source: "sidebar",
@@ -3004,6 +3196,7 @@ function createSidebarOverlayWindow() {
   );
 
   sidebarOverlayWindow.on("closed", () => {
+    clearProjectActionIntent("sidebar-window-closed");
     sidebarOverlayWindow = null;
     lastAppliedOverlayShapeSignature = "";
   });
@@ -3096,6 +3289,7 @@ function createWorkspaceWindow() {
 
   workspaceWindow.on("closed", () => {
     clearPaneCloseNotice();
+    clearProjectActionIntent("workspace-window-closed");
 
     if (isUsableWindow(sidebarOverlayWindow)) {
       sidebarOverlayWindow.destroy();
@@ -3306,6 +3500,54 @@ ipcMain.on(
 );
 
 ipcMain.on(
+  "chatgpt-sidebar-project-action-candidate",
+  (event, candidate) => {
+    if (
+      !isUsableWindow(sidebarOverlayWindow) ||
+      event.sender.id !==
+        sidebarOverlayWindow.webContents.id
+    ) {
+      return;
+    }
+
+    const overlayState =
+      overlayOnlyUiActive ||
+      Boolean(lockedDialogRect) ||
+      fullscreenOverlayMode
+        ? "dialog"
+        : candidate?.overlayState;
+    const decision = decideProjectActionCandidate({
+      phase: candidate?.phase,
+      controlKind: candidate?.controlKind,
+      hasAnchor: Boolean(candidate?.hasAnchor),
+      insideDialog: Boolean(candidate?.insideDialog),
+      overlayState,
+      overlayControl: Boolean(candidate?.overlayControl),
+      closeControl: Boolean(candidate?.closeControl),
+      externalControl: Boolean(candidate?.externalControl),
+      backdropControl: Boolean(candidate?.backdropControl)
+    });
+
+    recordIntegrationEvent({
+      event: "project-action-candidate",
+      pane: activePaneIndex + 1,
+      source: "pointerdown",
+      action: decision.action,
+      reason: decision.reason
+    });
+
+    if (
+      decision.action !== "create-project-intent" ||
+      !isUsableView(getActivePaneView())
+    ) {
+      return;
+    }
+
+    createProjectActionIntent();
+  }
+);
+
+ipcMain.on(
   "chatgpt-sidebar-dialog-close-intent",
   (event) => {
     if (!isUsableWindow(sidebarOverlayWindow)) {
@@ -3318,6 +3560,8 @@ ipcMain.on(
     ) {
       return;
     }
+
+    clearProjectActionIntent("dialog-close-intent");
 
     const hadOverlayDialog =
       overlayOnlyUiActive ||
@@ -3367,6 +3611,8 @@ ipcMain.on(
     ) {
       return;
     }
+
+    clearProjectActionIntent("anchor-route-intent");
 
     const routeKind = getDiagnosticRouteKind(url);
 
@@ -3448,6 +3694,8 @@ ipcMain.on(
       return;
     }
 
+    clearProjectActionIntent("external-route-intent");
+
     openFullscreenAccountRoute(url);
   }
 );
@@ -3464,6 +3712,8 @@ ipcMain.on(
     ) {
       return;
     }
+
+    clearProjectActionIntent("overlay-only-intent");
 
     setOverlayOnlyUiActive(true);
   }
@@ -3489,6 +3739,8 @@ ipcMain.on(
 
       return;
     }
+
+    clearProjectActionIntent("fullscreen-overlay-opened");
 
     setFullscreenOverlayMode(true);
   }
@@ -3520,6 +3772,7 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   clearPaneCloseNotice();
+  clearProjectActionIntent("app-will-quit");
   saveOpenPaneUrls();
   saveConfigNow();
 
@@ -3546,6 +3799,10 @@ app.on("will-quit", () => {
 
   ipcMain.removeAllListeners(
     "chatgpt-sidebar-dialog-close-intent"
+  );
+
+  ipcMain.removeAllListeners(
+    "chatgpt-sidebar-project-action-candidate"
   );
 
   ipcMain.removeAllListeners(
