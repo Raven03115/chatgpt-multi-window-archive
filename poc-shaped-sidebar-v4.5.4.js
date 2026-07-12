@@ -20,6 +20,14 @@ const {
 const {
   createDiagnosticsLogger
 } = require("./lib/diagnostics.cjs");
+const {
+  buildOverlayShape,
+  classifyOverlayControl,
+  decideOverlayControl,
+  replaceDialogRect,
+  replacePopupRects,
+  transitionOverlayState
+} = require("./lib/overlay-policy.cjs");
 
 const CHATGPT_URL = "https://chatgpt.com";
 const CHATGPT_PARTITION = "persist:chatgpt-shared";
@@ -184,9 +192,14 @@ let sidebarInitialLoadComplete = false;
 
 let overlayOnlyUiActive = false;
 let fullscreenOverlayMode = false;
+let overlayRuntimeState = transitionOverlayState(
+  { mode: "sidebar-only", generation: 0 }
+);
+let overlayPendingTimer = null;
 let sidebarRouteForwardSuppressionUntil = 0;
 let panesSuppressedForOverlay = false;
 let lastAppliedOverlayShapeSignature = "";
+let lastSkippedOverlayShapeSignature = "";
 let projectActionIntent = null;
 let projectActionIntentGeneration = 0;
 let projectActionIntentTimer = null;
@@ -754,8 +767,7 @@ function layoutPaneViews() {
 
 function updatePaneSuppression() {
   const shouldSuppress =
-    overlayOnlyUiActive ||
-    fullscreenOverlayMode;
+    overlayRuntimeState.suppressPanes;
 
   if (
     panesSuppressedForOverlay ===
@@ -1605,8 +1617,11 @@ function refreshActivePaneAndSidebar(
   popupRects = [];
   lockedDialogRect = null;
   manualExpanded = false;
-  overlayOnlyUiActive = false;
-  fullscreenOverlayMode = false;
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    { type: "close" },
+    "refresh-requested"
+  );
   sidebarRouteForwardSuppressionUntil = 0;
   suppressDialogLockUntil =
     Date.now() +
@@ -1787,8 +1802,11 @@ function completeOverlayWorkspaceSelection(url) {
 
   popupRects = [];
   lockedDialogRect = null;
-  overlayOnlyUiActive = false;
-  fullscreenOverlayMode = false;
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    { type: "close" },
+    "workspace-selection-completed"
+  );
   sidebarRouteForwardSuppressionUntil = 0;
 
   suppressDialogLockUntil =
@@ -1938,19 +1956,138 @@ function handleSidebarNavigation(url) {
   }
 }
 
-function setOverlayOnlyUiActive(active) {
-  overlayOnlyUiActive = Boolean(active);
+function clearOverlayPendingTimer() {
+  if (overlayPendingTimer) {
+    clearTimeout(overlayPendingTimer);
+    overlayPendingTimer = null;
+  }
+}
 
-  if (overlayOnlyUiActive) {
-    clearProjectActionIntent("overlay-state-activated");
+function applyOverlayRuntimeEvent(event, reason) {
+  const previousMode = overlayRuntimeState.mode;
+
+  if (
+    previousMode === "overlay-intent-pending" &&
+    ![
+      "overlay-intent",
+      "dialog-detected",
+      "dialog-missing"
+    ].includes(event?.type)
+  ) {
+    recordIntegrationEvent({
+      event: "overlay-pending-cancelled",
+      mode: previousMode,
+      source: "overlay-state",
+      action: "cancel-pending",
+      reason
+    });
   }
 
-  /*
-   * Do not start a route guard merely because shape detection found a
-   * dialog-like surface. The confirmed close-intent path owns that
-   * guard, preventing false positives from blocking later chat clicks.
-   */
+  overlayRuntimeState = transitionOverlayState(
+    overlayRuntimeState,
+    event
+  );
+  overlayOnlyUiActive =
+    overlayRuntimeState.mode === "shaped-dialog";
+  fullscreenOverlayMode =
+    overlayRuntimeState.mode === "fullscreen";
+
+  if (previousMode !== overlayRuntimeState.mode) {
+    recordIntegrationEvent({
+      event: "overlay-mode-changed",
+      mode: overlayRuntimeState.mode,
+      source: "overlay-state",
+      action: "transition",
+      reason
+    });
+    recordIntegrationEvent({
+      event: "overlay-isolation-state",
+      mode: overlayRuntimeState.mode,
+      source: "overlay-state",
+      action: overlayRuntimeState.mainWorkspaceVisible
+        ? "show-main-workspace"
+        : "hide-main-workspace",
+      reason: "mode-derived-isolation"
+    });
+  }
+
   updatePaneSuppression();
+}
+
+function beginOverlayIntentPending() {
+  clearProjectActionIntent("overlay-intent-pending");
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    { type: "overlay-intent" },
+    "explicit-overlay-control"
+  );
+
+  const generation = overlayRuntimeState.generation;
+  const startedAt = performance.now();
+
+  recordIntegrationEvent({
+    event: "overlay-intent-pending",
+    mode: overlayRuntimeState.mode,
+    source: "overlay-control",
+    action: "wait-for-dialog",
+    reason: "explicit-overlay-control"
+  });
+
+  overlayPendingTimer = setTimeout(() => {
+    overlayPendingTimer = null;
+
+    if (
+      overlayRuntimeState.mode !== "overlay-intent-pending" ||
+      overlayRuntimeState.generation !== generation
+    ) {
+      return;
+    }
+
+    applyOverlayRuntimeEvent(
+      { type: "dialog-missing" },
+      "dialog-surface-timeout"
+    );
+    recordIntegrationEvent({
+      event: "overlay-dialog-missing",
+      mode: overlayRuntimeState.mode,
+      source: "overlay-state",
+      action: "return-to-sidebar",
+      reason: "no-valid-dialog-surface",
+      elapsedMs: Math.round(
+        performance.now() - startedAt
+      )
+    });
+    applyOverlayShape();
+  }, 1500);
+}
+
+function setOverlayOnlyUiActive(active) {
+  if (active) {
+    if (lockedDialogRect) {
+      clearOverlayPendingTimer();
+      applyOverlayRuntimeEvent(
+        { type: "dialog-detected" },
+        "existing-dialog-surface"
+      );
+      return;
+    }
+
+    if (
+      overlayRuntimeState.mode ===
+      "overlay-intent-pending"
+    ) {
+      return;
+    }
+
+    beginOverlayIntentPending();
+    return;
+  }
+
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    { type: "close" },
+    "overlay-closed"
+  );
 }
 
 function sendFullscreenOverlayClass(enabled) {
@@ -1965,13 +2102,22 @@ function sendFullscreenOverlayClass(enabled) {
 }
 
 function setFullscreenOverlayMode(enabled) {
-  fullscreenOverlayMode = Boolean(enabled);
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    enabled
+      ? {
+          type: "fullscreen",
+          explicitExternal: true
+        }
+      : { type: "close" },
+    enabled
+      ? "explicit-external-route"
+      : "fullscreen-closed"
+  );
 
   sendFullscreenOverlayClass(
     fullscreenOverlayMode
   );
-
-  updatePaneSuppression();
   applyOverlayShape();
 }
 
@@ -2024,16 +2170,17 @@ function dismissSidebarTransientUi() {
    */
   popupRects = [];
   lockedDialogRect = null;
-
-  overlayOnlyUiActive = false;
-  fullscreenOverlayMode = false;
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    { type: "close" },
+    "sidebar-transient-ui-dismissed"
+  );
 
   suppressDialogLockUntil =
     Date.now() +
     CLOSE_UNLOCK_SUPPRESSION_MS;
 
   sendFullscreenOverlayClass(false);
-  updatePaneSuppression();
   applyOverlayShape();
 
   /*
@@ -2871,31 +3018,22 @@ function applyOverlayShape() {
       )
       .filter(Boolean);
 
-    shapeRects = [
-      {
-        x: 0,
-        y: 0,
-        width: Math.min(
-          SIDEBAR_WIDTH,
-          bounds.width
-        ),
-        height: bounds.height
-      }
-    ];
-
+    let sanitizedDialog = null;
     if (lockedDialogRect) {
-      const sanitizedDialog =
+      sanitizedDialog =
         sanitizeDialogRect(
           lockedDialogRect,
           bounds
         );
-
-      if (sanitizedDialog) {
-        shapeRects.push(sanitizedDialog);
-      }
     }
 
-    shapeRects.push(...sanitizedPopupRects);
+    shapeRects = buildOverlayShape({
+      mode: overlayRuntimeState.mode,
+      bounds,
+      sidebarWidth: SIDEBAR_WIDTH,
+      dialogRect: sanitizedDialog,
+      popupRects: sanitizedPopupRects
+    });
   }
 
   const shapeSignature =
@@ -2905,6 +3043,21 @@ function applyOverlayShape() {
     shapeSignature ===
     lastAppliedOverlayShapeSignature
   ) {
+    if (
+      lastSkippedOverlayShapeSignature !==
+      shapeSignature
+    ) {
+      lastSkippedOverlayShapeSignature =
+        shapeSignature;
+      recordIntegrationEvent({
+        event: "overlay-shape-skipped",
+        mode: overlayRuntimeState.mode,
+        source: "overlay-shape",
+        action: "skip",
+        reason: "shape-signature-unchanged",
+        rectCount: shapeRects.length
+      });
+    }
     return;
   }
 
@@ -2913,8 +3066,26 @@ function applyOverlayShape() {
       shapeRects
     );
 
+    if (
+      shapeRects.length > 1 &&
+      typeof sidebarOverlayWindow.moveTop === "function"
+    ) {
+      sidebarOverlayWindow.moveTop();
+    }
+
     lastAppliedOverlayShapeSignature =
       shapeSignature;
+    lastSkippedOverlayShapeSignature = "";
+    recordIntegrationEvent({
+      event: "overlay-shape-applied",
+      mode: overlayRuntimeState.mode,
+      source: "overlay-shape",
+      action: "apply",
+      reason: shapeRects.length > 1
+        ? "surface-shape-and-z-order-updated"
+        : "sidebar-shape-updated",
+      rectCount: shapeRects.length
+    });
   } catch (error) {
     console.error(
       "[Integration v4.5.6] setShape failed:",
@@ -2930,7 +3101,11 @@ function setManualExpanded(expanded) {
 
 function unlockDialogShape(suppressSidebarRoute = false) {
   lockedDialogRect = null;
-  overlayOnlyUiActive = false;
+  clearOverlayPendingTimer();
+  applyOverlayRuntimeEvent(
+    { type: "close" },
+    "dialog-unlocked"
+  );
 
   if (suppressSidebarRoute) {
     /*
@@ -2951,7 +3126,6 @@ function unlockDialogShape(suppressSidebarRoute = false) {
 
   popupRects = [];
 
-  updatePaneSuppression();
   applyOverlayShape();
 
   console.log(
@@ -3197,6 +3371,7 @@ function createSidebarOverlayWindow() {
 
   sidebarOverlayWindow.on("closed", () => {
     clearProjectActionIntent("sidebar-window-closed");
+    clearOverlayPendingTimer();
     sidebarOverlayWindow = null;
     lastAppliedOverlayShapeSignature = "";
   });
@@ -3465,37 +3640,118 @@ ipcMain.on(
         bounds
       );
 
-    popupRects = Array.isArray(
-      state?.popupRects
-    )
-      ? state.popupRects.slice(
-          0,
-          MAX_POPUP_RECTS
-        )
-      : [];
+    const previousPopupCount = popupRects.length;
+    popupRects = replacePopupRects(
+      popupRects,
+      Array.isArray(state?.popupRects)
+        ? state.popupRects.slice(
+            0,
+            MAX_POPUP_RECTS
+          )
+        : []
+    );
 
     if (
-      !lockedDialogRect &&
+      previousPopupCount === 0 &&
+      popupRects.length > 0
+    ) {
+      applyOverlayRuntimeEvent(
+        { type: "popup-detected" },
+        "popup-surface-detected"
+      );
+    } else if (
+      previousPopupCount > 0 &&
+      popupRects.length === 0
+    ) {
+      applyOverlayRuntimeEvent(
+        { type: "popup-removed" },
+        "popup-surface-removed"
+      );
+    }
+
+    if (
       nextDialogRect &&
       Date.now() >=
         suppressDialogLockUntil
     ) {
-      lockedDialogRect =
-        nextDialogRect;
+      const previousDialogRect = lockedDialogRect;
+      lockedDialogRect = replaceDialogRect(
+        lockedDialogRect,
+        nextDialogRect
+      );
+      clearOverlayPendingTimer();
 
       if (!fullscreenOverlayMode) {
-        setOverlayOnlyUiActive(true);
+        applyOverlayRuntimeEvent(
+          { type: "dialog-detected" },
+          previousDialogRect
+            ? "dialog-surface-resized-or-replaced"
+            : "dialog-surface-detected"
+        );
       }
+
+      recordIntegrationEvent({
+        event: previousDialogRect
+          ? "dialog-rect-changed"
+          : "overlay-dialog-detected",
+        mode: overlayRuntimeState.mode,
+        source: "shape-state",
+        action: previousDialogRect
+          ? "replace-rect"
+          : "attach-dialog",
+        reason: previousDialogRect
+          ? "latest-dialog-rect-replaced-old"
+          : "valid-dialog-surface",
+        rectWidth: lockedDialogRect.width,
+        rectHeight: lockedDialogRect.height
+      });
 
       console.log(
         "[Integration v4.5.6] dialog shape locked:",
         lockedDialogRect
+      );
+    } else if (
+      !nextDialogRect &&
+      lockedDialogRect &&
+      !fullscreenOverlayMode
+    ) {
+      lockedDialogRect = null;
+      applyOverlayRuntimeEvent(
+        { type: "close" },
+        "dialog-surface-removed"
       );
     }
 
     if (!manualExpanded) {
       applyOverlayShape();
     }
+  }
+);
+
+ipcMain.on(
+  "chatgpt-sidebar-diagnostic-event",
+  (event, diagnostic) => {
+    if (
+      !isUsableWindow(sidebarOverlayWindow) ||
+      event.sender.id !==
+        sidebarOverlayWindow.webContents.id
+    ) {
+      return;
+    }
+
+    recordIntegrationEvent({
+      event: diagnostic?.event,
+      controlKind: diagnostic?.controlKind,
+      routeKind: diagnostic?.routeKind,
+      mode: diagnostic?.mode,
+      source: "sidebar-preload",
+      action: diagnostic?.action,
+      reason: diagnostic?.reason,
+      elapsedMs: diagnostic?.elapsedMs,
+      rectWidth: diagnostic?.rectWidth,
+      rectHeight: diagnostic?.rectHeight,
+      rectCount: diagnostic?.rectCount
+    });
   }
 );
 
@@ -3516,7 +3772,17 @@ ipcMain.on(
       fullscreenOverlayMode
         ? "dialog"
         : candidate?.overlayState;
-    const decision = decideProjectActionCandidate({
+    const classifiedControl = classifyOverlayControl({
+      actionableKind: candidate?.controlKind,
+      overlayControl: Boolean(candidate?.overlayControl),
+      closeControl: Boolean(candidate?.closeControl),
+      externalControl: Boolean(candidate?.externalControl),
+      backdropControl: Boolean(candidate?.backdropControl)
+    });
+    const controlDecision = decideOverlayControl(
+      classifiedControl
+    );
+    let decision = decideProjectActionCandidate({
       phase: candidate?.phase,
       controlKind: candidate?.controlKind,
       hasAnchor: Boolean(candidate?.hasAnchor),
@@ -3528,6 +3794,24 @@ ipcMain.on(
       backdropControl: Boolean(candidate?.backdropControl)
     });
 
+    if (
+      decision.action === "create-project-intent" &&
+      !controlDecision.projectIntent
+    ) {
+      decision = {
+        action: "ignore-project-candidate",
+        reason: "overlay-control-policy-rejected"
+      };
+    }
+
+    recordIntegrationEvent({
+      event: "overlay-control-classified",
+      controlKind: classifiedControl,
+      mode: overlayRuntimeState.mode,
+      source: "pointerdown",
+      action: decision.action,
+      reason: decision.reason
+    });
     recordIntegrationEvent({
       event: "project-action-candidate",
       pane: activePaneIndex + 1,
@@ -3566,7 +3850,9 @@ ipcMain.on(
     const hadOverlayDialog =
       overlayOnlyUiActive ||
       Boolean(lockedDialogRect) ||
-      fullscreenOverlayMode;
+      fullscreenOverlayMode ||
+      overlayRuntimeState.mode ===
+        "overlay-intent-pending";
 
     if (!hadOverlayDialog) {
       recordIntegrationEvent({
@@ -3773,6 +4059,7 @@ app.whenReady().then(() => {
 app.on("will-quit", () => {
   clearPaneCloseNotice();
   clearProjectActionIntent("app-will-quit");
+  clearOverlayPendingTimer();
   saveOpenPaneUrls();
   saveConfigNow();
 
@@ -3792,6 +4079,10 @@ app.on("will-quit", () => {
   }
 
   globalShortcut.unregisterAll();
+
+  ipcMain.removeAllListeners(
+    "chatgpt-sidebar-diagnostic-event"
+  );
 
   ipcMain.removeAllListeners(
     "chatgpt-sidebar-shape-state"

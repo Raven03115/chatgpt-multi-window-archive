@@ -8,9 +8,6 @@ const LARGE_DIALOG_PADDING = 1;
 const MIN_RECT_SIZE = 4;
 const MERGE_GAP = 3;
 
-const MUTATION_REPORT_DELAY_MS = 120;
-const FALLBACK_REPORT_INTERVAL_MS = 3000;
-
 const DIALOG_ROOT_SELECTORS = [
   '[role="dialog"]',
   '[aria-modal="true"]',
@@ -118,12 +115,22 @@ ipcRenderer.on(
 );
 
 let observer = null;
-let fallbackTimer = null;
-let mutationReportTimer = null;
+let dialogResizeObserver = null;
+let popupResizeObserver = null;
+let observedDialogSurface = null;
+let observedPopupSurfaces = new Set();
+let reportAnimationFrame = null;
 let started = false;
 let lastSignature = "";
+let lastDialogRectSignature = "";
+let lastPopupRectsSignature = "[]";
 
-const pendingTimers = new Map();
+function reportDiagnostic(event) {
+  ipcRenderer.send(
+    "chatgpt-sidebar-diagnostic-event",
+    event
+  );
+}
 
 function isVisible(element) {
   if (!(element instanceof Element)) {
@@ -566,10 +573,13 @@ function findBestDialogSurface() {
 
   const best = results[0];
 
-  return normalizeRawRect(
-    best.rect,
-    LARGE_DIALOG_PADDING
-  );
+  return {
+    element: best.element,
+    rect: normalizeRawRect(
+      best.rect,
+      LARGE_DIALOG_PADDING
+    )
+  };
 }
 
 function rectanglesTouch(
@@ -647,10 +657,11 @@ function mergeRects(inputRects) {
   return rects.slice(0, MAX_RECTS);
 }
 
-function collectSmallPopupRects(
+function collectSmallPopupSurfaces(
   dialogRect
 ) {
   const rects = [];
+  const elements = [];
 
   for (
     const element of collectElements(
@@ -707,19 +718,149 @@ function collectSmallPopupRects(
     }
 
     rects.push(rect);
+    elements.push(element);
   }
 
-  return mergeRects(rects);
+  return {
+    elements,
+    rects: mergeRects(rects)
+  };
+}
+
+function scheduleFrameReport() {
+  if (reportAnimationFrame !== null) {
+    return;
+  }
+
+  reportAnimationFrame = requestAnimationFrame(() => {
+    reportAnimationFrame = null;
+    reportShapeState();
+  });
+}
+
+function syncDialogResizeObserver(element) {
+  if (observedDialogSurface === element) {
+    return;
+  }
+
+  if (dialogResizeObserver) {
+    dialogResizeObserver.disconnect();
+  }
+
+  if (observedDialogSurface) {
+    reportDiagnostic({
+      event: "dialog-observer-detached",
+      action: "detach",
+      reason: element
+        ? "dialog-surface-replaced"
+        : "dialog-surface-removed"
+    });
+  }
+
+  const replaced = Boolean(
+    observedDialogSurface && element
+  );
+  observedDialogSurface = element || null;
+
+  if (replaced) {
+    reportDiagnostic({
+      event: "dialog-surface-replaced",
+      action: "replace",
+      reason: "current-dialog-node-changed"
+    });
+  }
+
+  if (observedDialogSurface && dialogResizeObserver) {
+    dialogResizeObserver.observe(
+      observedDialogSurface
+    );
+    reportDiagnostic({
+      event: "dialog-observer-attached",
+      action: "attach",
+      reason: "active-dialog-surface"
+    });
+  }
+}
+
+function syncPopupResizeObservers(elements) {
+  const next = new Set(elements);
+  let changed = next.size !== observedPopupSurfaces.size;
+
+  if (!changed) {
+    changed = [...next].some(
+      (element) => !observedPopupSurfaces.has(element)
+    );
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  if (popupResizeObserver) {
+    popupResizeObserver.disconnect();
+    for (const element of next) {
+      popupResizeObserver.observe(element);
+    }
+  }
+
+  observedPopupSurfaces = next;
 }
 
 function reportShapeState() {
-  const dialogRect =
+  const dialogSurface =
     findBestDialogSurface();
-
-  const popupRects =
-    collectSmallPopupRects(
+  const dialogRect =
+    dialogSurface?.rect || null;
+  const popupSurfaces =
+    collectSmallPopupSurfaces(
       dialogRect
     );
+  const popupRects = popupSurfaces.rects;
+
+  syncDialogResizeObserver(
+    dialogSurface?.element || null
+  );
+  syncPopupResizeObservers(
+    popupSurfaces.elements
+  );
+
+  const dialogSignature =
+    JSON.stringify(dialogRect);
+  const popupSignature =
+    JSON.stringify(popupRects);
+
+  if (dialogSignature !== lastDialogRectSignature) {
+    reportDiagnostic({
+      event: dialogRect
+        ? "dialog-rect-changed"
+        : "overlay-dialog-missing",
+      action: dialogRect ? "update" : "remove",
+      reason: dialogRect
+        ? "dialog-surface-bounds-changed"
+        : "no-valid-dialog-surface",
+      rectWidth: dialogRect?.width,
+      rectHeight: dialogRect?.height
+    });
+    lastDialogRectSignature = dialogSignature;
+  }
+
+  if (popupSignature !== lastPopupRectsSignature) {
+    const previousHadPopup =
+      lastPopupRectsSignature !== "[]";
+    reportDiagnostic({
+      event: popupRects.length > 0
+        ? previousHadPopup
+          ? "popup-rect-changed"
+          : "popup-detected"
+        : "popup-rect-removed",
+      action: popupRects.length > 0
+        ? "update"
+        : "remove",
+      reason: "popup-surface-set-changed",
+      rectCount: popupRects.length
+    });
+    lastPopupRectsSignature = popupSignature;
+  }
 
   const payload = {
     dialogRect,
@@ -889,6 +1030,12 @@ function getAnchorUrl(target) {
     return null;
   }
 
+  const control = getControlElement(target);
+
+  if (control && isMenuTriggerControl(control)) {
+    return null;
+  }
+
   const anchor =
     target.closest("a[href]");
 
@@ -964,10 +1111,75 @@ function getControlKind(control) {
   return "other";
 }
 
+function isMenuTriggerControl(control) {
+  if (!(control instanceof Element)) {
+    return false;
+  }
+
+  const hasPopup = String(
+    control.getAttribute("aria-haspopup") || ""
+  ).toLowerCase();
+  const controlsId =
+    control.getAttribute("aria-controls");
+  const expanded =
+    control.getAttribute("aria-expanded");
+  let controlsMenu = false;
+
+  if (controlsId) {
+    try {
+      const controlled = document.getElementById(
+        controlsId
+      );
+      controlsMenu = Boolean(
+        controlled &&
+        controlled.matches(
+          '[role="menu"], [data-radix-menu-content], [data-radix-dropdown-menu-content]'
+        )
+      );
+    } catch {
+      controlsMenu = false;
+    }
+  }
+
+  return (
+    hasPopup === "menu" ||
+    hasPopup === "true" ||
+    controlsMenu ||
+    Boolean(controlsId && expanded !== null)
+  );
+}
+
+function reportMenuTrigger(target) {
+  const control = getControlElement(target);
+
+  if (!control || !isMenuTriggerControl(control)) {
+    return false;
+  }
+
+  reportDiagnostic({
+    event: "menu-trigger-detected",
+    controlKind: "menu-trigger",
+    action: "preserve-native-menu",
+    reason: "semantic-menu-trigger"
+  });
+  reportDiagnostic({
+    event: "menu-route-suppressed",
+    controlKind: "menu-trigger",
+    action: "ignore-route-intent",
+    reason: "menu-trigger-precedes-parent-anchor"
+  });
+
+  return true;
+}
+
 function reportProjectActionCandidate(target) {
   const control = getControlElement(target);
 
   if (!control) {
+    return false;
+  }
+
+  if (isMenuTriggerControl(control)) {
     return false;
   }
 
@@ -1175,6 +1387,12 @@ function mayContainShapeUi(value) {
 }
 
 function mutationMayAffectShape(record) {
+  if (record.type === "characterData") {
+    return matchesOrIsInsideShapeUi(
+      record.target.parentElement
+    );
+  }
+
   if (record.type === "attributes") {
     return matchesOrIsInsideShapeUi(
       record.target
@@ -1193,38 +1411,14 @@ function mutationMayAffectShape(record) {
   ].some(mayContainShapeUi);
 }
 
-function scheduleMutationReport() {
-  if (mutationReportTimer) {
-    clearTimeout(mutationReportTimer);
-  }
-
-  mutationReportTimer = setTimeout(() => {
-    mutationReportTimer = null;
-    reportShapeState();
-  }, MUTATION_REPORT_DELAY_MS);
-}
-
-function scheduleReport(delay = 0) {
-  if (pendingTimers.has(delay)) {
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    pendingTimers.delete(delay);
-    reportShapeState();
-  }, delay);
-
-  pendingTimers.set(delay, timer);
-}
-
 function scheduleReportBurst() {
-  scheduleReport(0);
-  scheduleReport(120);
-  scheduleReport(400);
+  scheduleFrameReport();
 }
 
 function handlePointerDown(event) {
-  if (isUpgradeControl(event.target)) {
+  if (reportMenuTrigger(event.target)) {
+    // Preserve the official menu handler without routing the row anchor.
+  } else if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
   } else if (
     isOverlayOnlyControl(event.target)
@@ -1249,7 +1443,11 @@ function handlePointerDown(event) {
 }
 
 function handleClick(event) {
-  if (isUpgradeControl(event.target)) {
+  const control = getControlElement(event.target);
+
+  if (control && isMenuTriggerControl(control)) {
+    // The official click handler owns menu visibility.
+  } else if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
   } else if (
     isOverlayOnlyControl(event.target)
@@ -1285,11 +1483,18 @@ function startDetection() {
 
   installOverlayIsolationStyle();
 
+  dialogResizeObserver = new ResizeObserver(
+    scheduleFrameReport
+  );
+  popupResizeObserver = new ResizeObserver(
+    scheduleFrameReport
+  );
+
   observer = new MutationObserver((records) => {
     installOverlayIsolationStyle();
 
     if (records.some(mutationMayAffectShape)) {
-      scheduleMutationReport();
+      scheduleFrameReport();
     }
   });
 
@@ -1299,6 +1504,7 @@ function startDetection() {
       childList: true,
       subtree: true,
       attributes: true,
+      characterData: true,
       attributeFilter: [
         "class",
         "hidden",
@@ -1307,7 +1513,8 @@ function startDetection() {
         "aria-expanded",
         "aria-modal",
         "role",
-        "data-state"
+        "data-state",
+        "style"
       ]
     }
   );
@@ -1332,30 +1539,25 @@ function startDetection() {
 
   document.addEventListener(
     "transitionend",
-    scheduleMutationReport,
+    scheduleFrameReport,
     true
   );
 
   document.addEventListener(
     "animationend",
-    scheduleMutationReport,
+    scheduleFrameReport,
     true
   );
 
   document.addEventListener(
     "scroll",
-    scheduleMutationReport,
+    scheduleFrameReport,
     true
   );
 
   window.addEventListener(
     "resize",
     scheduleReportBurst
-  );
-
-  fallbackTimer = setInterval(
-    reportShapeState,
-    FALLBACK_REPORT_INTERVAL_MS
   );
 
   scheduleReportBurst();
@@ -1379,22 +1581,22 @@ window.addEventListener(
       observer = null;
     }
 
-    if (fallbackTimer) {
-      clearInterval(fallbackTimer);
-      fallbackTimer = null;
+    if (dialogResizeObserver) {
+      dialogResizeObserver.disconnect();
+      dialogResizeObserver = null;
     }
 
-    if (mutationReportTimer) {
-      clearTimeout(mutationReportTimer);
-      mutationReportTimer = null;
+    if (popupResizeObserver) {
+      popupResizeObserver.disconnect();
+      popupResizeObserver = null;
     }
 
-    for (
-      const timer of pendingTimers.values()
-    ) {
-      clearTimeout(timer);
+    if (reportAnimationFrame !== null) {
+      cancelAnimationFrame(reportAnimationFrame);
+      reportAnimationFrame = null;
     }
 
-    pendingTimers.clear();
+    observedDialogSurface = null;
+    observedPopupSurfaces.clear();
   }
 );
