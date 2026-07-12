@@ -2,6 +2,20 @@
 
 本文件記錄各版本的重要功能、修正與行為變更。
 
+## v4.5.7 — 2026-07-12
+
+- 修正點擊一般對話與 Project 對話的三點操作按鈕時，可能誤切換或開啟對話的問題。
+- 修正三點操作選單、menu、popup 或 listbox 偶爾被第一個對話窗格遮住的問題。
+- 修正開啟 Project 設定時，畫面可能全灰但設定面板沒有顯示的問題。
+- 修正 Project 指令及其他動態設定內容增高、縮小、刪除或清空後，設定面板裁切範圍沒有同步的問題。
+- 防止舊 dialog 或 popup rect 殘留，避免新舊設定面板或彈出視窗重疊。
+- 防止 sidebar WebContents 的原始 main workspace 與設定面板同時顯示。
+- 新增集中式 overlay control、shape 與狀態政策。
+- 新增安全的 overlay、dialog、popup 與 isolation diagnostics。
+- 新增 43 個單元測試及 1 個離線 Electron fixture，合計 44 個自動測試。
+- 保持一般對話、Project 對話、Project 新對話、Settings、Search、外部帳號頁面及既有 pane 行為。
+- 4 格或 6 格切換對話時可能出現的短暫背景閃爍仍屬已知限制，本版本未處理。
+
 ## v4.5.6 — 2026-07-12
 
 - 修正從 Project 建立新對話時，指定活動窗格沒有進入 Project 新對話的問題。

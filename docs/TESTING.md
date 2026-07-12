@@ -10,6 +10,8 @@
 - `npm run diagnostics -- --last 250`：調整顯示筆數，最大 5000 筆。
 - `npm run diagnostics -- --errors-only`：只顯示失敗或錯誤事件。
 
+目前完整測試包含 43 個 unit tests 與 1 個離線 Electron fixture，合計 44 個測試。Electron fixture 會驗證 production sidebar preload 與 overlay policy，但不連線 `chatgpt.com`，也不使用使用者的登入 Session、Cookie、對話或 Project 資料。`npm run verify` 會執行完整 Repository 檢查與全部 44 個自動測試。
+
 ## 日誌位置與輪替
 
 預設日誌位於 Electron `app.getPath("userData")/logs/integration-events.jsonl`。在一般 Windows 安裝中，userData 通常位於 `%APPDATA%/chatgpt-multi-window`。目前檔案超過 2 MB 時會輪替為：
