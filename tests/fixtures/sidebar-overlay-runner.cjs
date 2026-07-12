@@ -9,6 +9,7 @@ const {
   session
 } = require("electron");
 const {
+  buildOverlayShape,
   transitionOverlayState
 } = require("../../lib/overlay-policy.cjs");
 
@@ -22,6 +23,7 @@ let overlayState = transitionOverlayState({
 });
 let overlayPendingTimer = null;
 let overlayMoveTopCount = 0;
+let fixtureDialogVisible = false;
 
 function assert(condition, message) {
   if (!condition) {
@@ -93,6 +95,113 @@ async function dispatchPointerAndClick(selector) {
   );
 }
 
+async function runConfirmationFlow(options) {
+  const {
+    triggerSelector,
+    minimumWidth,
+    minimumHeight
+  } = options;
+  const menuStart = events.length;
+
+  await dispatchPointerAndClick(triggerSelector);
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= menuStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.popupRects?.length > 0
+  );
+  const triggerEvents = events.slice(menuStart);
+  assert(!triggerEvents.some((entry) =>
+    entry.channel === "chatgpt-sidebar-route-intent" ||
+    entry.channel === "chatgpt-sidebar-project-action-candidate"
+  ), "confirmation menu trigger routed or created an intent");
+
+  const dialogStart = events.length;
+  const moveTopBefore = overlayMoveTopCount;
+  await dispatchPointerAndClick("#fixture-destructive-action");
+  const dialogState = await waitForEvent((entry) =>
+    events.indexOf(entry) >= dialogStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect &&
+    entry.payload?.popupRects?.length === 0
+  );
+  assert(!events.slice(dialogStart).some((entry) =>
+    entry.channel === "chatgpt-sidebar-route-intent" ||
+    entry.channel === "chatgpt-sidebar-project-action-candidate"
+  ), "native menu action routed or created Project intent");
+  assert(
+    dialogState.payload.dialogRect.width >= minimumWidth &&
+      dialogState.payload.dialogRect.height >= minimumHeight,
+    "compact confirmation rect was clipped"
+  );
+  assert(
+    overlayState.mode === "shaped-dialog" &&
+      overlayState.mainWorkspaceVisible === false,
+    "confirmation entered the wrong overlay mode"
+  );
+  assert(
+    overlayMoveTopCount > moveTopBefore,
+    "confirmation overlay was not raised above the pane"
+  );
+  assert(!events.slice(dialogStart).some((entry) =>
+    entry.channel === "chatgpt-sidebar-fullscreen-overlay-intent"
+  ), "confirmation enabled fullscreen mode");
+  const visibleState = await overlayWindow.webContents.executeJavaScript(`
+    ({
+      mainVisibility: getComputedStyle(document.querySelector("main")).visibility,
+      backdropDisplay: getComputedStyle(document.getElementById("fixture-backdrop")).display
+    })
+  `);
+  assert(
+    visibleState.mainVisibility === "hidden" &&
+      visibleState.backdropDisplay !== "none",
+    "workspace isolation or confirmation backdrop is incorrect"
+  );
+
+  const cancelStart = events.length;
+  await dispatchPointerAndClick('[data-fixture-result="cancel"]');
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= cancelStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    !entry.payload?.dialogRect &&
+    entry.payload?.popupRects?.length === 0
+  );
+  const cancelState = await overlayWindow.webContents.executeJavaScript(`
+    ({
+      confirmationExists: Boolean(document.getElementById("fixture-confirmation")),
+      backdropDisplay: getComputedStyle(document.getElementById("fixture-backdrop")).display
+    })
+  `);
+  assert(
+    cancelState.confirmationExists === false &&
+      cancelState.backdropDisplay === "none",
+    "confirmation cancel left stale UI"
+  );
+
+  const reopenMenuStart = events.length;
+  await dispatchPointerAndClick(triggerSelector);
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= reopenMenuStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.popupRects?.length > 0
+  );
+  const reopenDialogStart = events.length;
+  await dispatchPointerAndClick("#fixture-destructive-action");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= reopenDialogStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect &&
+    entry.payload?.popupRects?.length === 0
+  );
+  const confirmStart = events.length;
+  await dispatchPointerAndClick('[data-fixture-result="confirm"]');
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= confirmStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    !entry.payload?.dialogRect &&
+    entry.payload?.popupRects?.length === 0
+  );
+}
+
 async function run() {
   const fixturePartition = `sidebar-overlay-fixture-${Date.now()}`;
   const fixtureSession = session.fromPartition(fixturePartition);
@@ -145,8 +254,13 @@ async function run() {
 
       if (
         channel === "chatgpt-sidebar-shape-state" &&
-        Array.isArray(payload?.popupRects) &&
-        payload.popupRects.length > 0
+        (
+          payload?.dialogRect ||
+          (
+            Array.isArray(payload?.popupRects) &&
+            payload.popupRects.length > 0
+          )
+        )
       ) {
         overlayWindow.moveTop();
         overlayMoveTopCount += 1;
@@ -166,6 +280,17 @@ async function run() {
         }
       }
 
+      if (channel === "chatgpt-sidebar-fullscreen-overlay-intent") {
+        const enabled = payload === true;
+        overlayState = transitionOverlayState(overlayState, enabled
+          ? { type: "fullscreen", explicitExternal: true }
+          : { type: "close" });
+        overlayWindow.webContents.send(
+          "chatgpt-sidebar-set-fullscreen-mode",
+          enabled
+        );
+      }
+
       if (
         channel === "chatgpt-sidebar-shape-state" &&
         payload?.dialogRect
@@ -174,9 +299,20 @@ async function run() {
           clearTimeout(overlayPendingTimer);
           overlayPendingTimer = null;
         }
+        if (overlayState.mode !== "fullscreen") {
+          overlayState = transitionOverlayState(overlayState, {
+            type: "dialog-detected"
+          });
+        }
+        fixtureDialogVisible = true;
+      } else if (
+        channel === "chatgpt-sidebar-shape-state" &&
+        fixtureDialogVisible
+      ) {
         overlayState = transitionOverlayState(overlayState, {
-          type: "dialog-detected"
+          type: "close"
         });
+        fixtureDialogVisible = false;
       }
     });
   }
@@ -264,6 +400,94 @@ async function run() {
     entry.channel === "chatgpt-sidebar-project-action-candidate"
   );
 
+  const ordinaryMenuStart = events.length;
+  await dispatchPointerAndClick("#account-menu");
+  await dispatchPointerAndClick("#fixture-ordinary-action");
+  const ordinaryNativeClickCount =
+    await overlayWindow.webContents.executeJavaScript(
+      "Number(window.fixtureOrdinaryNativeClickCount || 0)"
+    );
+  assert(
+    ordinaryNativeClickCount === 1,
+    "ordinary menuitem native click did not run"
+  );
+  assert(!events.slice(ordinaryMenuStart).some((entry) =>
+    entry.channel === "chatgpt-sidebar-fullscreen-overlay-intent" ||
+    entry.channel === "chatgpt-sidebar-route-intent" ||
+    entry.channel === "chatgpt-sidebar-project-action-candidate"
+  ), "ordinary menuitem emitted an intent");
+
+  const upgradeStart = events.length;
+  await dispatchPointerAndClick("#account-menu");
+  await dispatchPointerAndClick("#fixture-upgrade-action");
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const upgradeEvents = events.slice(upgradeStart);
+  assert(upgradeEvents.some((entry) =>
+    entry.channel === "chatgpt-sidebar-fullscreen-overlay-intent" &&
+    entry.payload === true
+  ), "Upgrade role=menuitem did not emit fullscreen intent");
+  assert(!upgradeEvents.some((entry) =>
+    entry.channel === "chatgpt-sidebar-route-intent" ||
+    entry.channel === "chatgpt-sidebar-project-action-candidate"
+  ), "Upgrade role=menuitem emitted a route or Project intent");
+  const upgradeRendererState =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        nativeClickCount: Number(window.fixtureUpgradeNativeClickCount || 0),
+        mainVisibility: getComputedStyle(document.querySelector("main")).visibility,
+        fullscreenClass: document.documentElement.classList.contains("chatgpt-multi-fullscreen-overlay")
+      })
+    `);
+  assert(
+    upgradeRendererState.nativeClickCount === 1,
+    "Upgrade native click did not run"
+  );
+  assert(
+    upgradeRendererState.fullscreenClass === true &&
+      upgradeRendererState.mainVisibility === "visible" &&
+      overlayState.mode === "fullscreen",
+    "Upgrade did not preserve fullscreen mode after dialog report"
+  );
+  const upgradeShape = buildOverlayShape({
+    mode: overlayState.mode,
+    bounds: { width: 1200, height: 800 },
+    sidebarWidth: 260,
+    dialogRect: { x: 420, y: 120, width: 520, height: 420 },
+    popupRects: []
+  });
+  assert(
+    upgradeShape.length === 1 &&
+      upgradeShape[0].x === 0 &&
+      upgradeShape[0].y === 0 &&
+      upgradeShape[0].width === 1200 &&
+      upgradeShape[0].height === 800,
+    "Upgrade dialog report replaced the full viewport shape"
+  );
+  const upgradeCloseStart = events.length;
+  await dispatchPointerAndClick("#fixture-upgrade-close");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= upgradeCloseStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    !entry.payload?.dialogRect &&
+    entry.payload?.popupRects?.length === 0
+  );
+  const upgradeClosedState =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        surfaceExists: Boolean(document.getElementById("fixture-upgrade-surface")),
+        mainVisibility: getComputedStyle(document.querySelector("main")).visibility,
+        fullscreenClass: document.documentElement.classList.contains("chatgpt-multi-fullscreen-overlay")
+      })
+    `);
+  assert(
+    upgradeClosedState.surfaceExists === false &&
+      upgradeClosedState.fullscreenClass === false &&
+      upgradeClosedState.mainVisibility === "hidden" &&
+      overlayState.mode === "sidebar-only",
+    "closing Upgrade did not restore sidebar-only mode"
+  );
+
+  const settingsStart = events.length;
   await dispatchPointerAndClick("#project-settings");
   assert(
     overlayState.mode === "overlay-intent-pending",
@@ -274,6 +498,7 @@ async function run() {
     "pending state suppressed panes before dialog detection"
   );
   const initialDialog = await waitForEvent((entry) =>
+    events.indexOf(entry) >= settingsStart &&
     entry.channel === "chatgpt-sidebar-shape-state" &&
     entry.payload?.dialogRect?.height >= 300
   );
@@ -336,6 +561,37 @@ async function run() {
       overlayState.suppressPanes === false,
     "missing dialog did not return to sidebar-only"
   );
+
+  await runConfirmationFlow({
+    triggerSelector: "#conversation-menu-path",
+    minimumWidth: 320,
+    minimumHeight: 160
+  });
+  await runConfirmationFlow({
+    triggerSelector: "#project-menu-path",
+    minimumWidth: 280,
+    minimumHeight: 140
+  });
+  await runConfirmationFlow({
+    triggerSelector: "#project-root-menu-path",
+    minimumWidth: 300,
+    minimumHeight: 150
+  });
+  await runConfirmationFlow({
+    triggerSelector: "#plain-dialog-menu",
+    minimumWidth: 448,
+    minimumHeight: 176
+  });
+  await runConfirmationFlow({
+    triggerSelector: "#delayed-dialog-menu",
+    minimumWidth: 448,
+    minimumHeight: 176
+  });
+  await runConfirmationFlow({
+    triggerSelector: "#ancestor-dialog-menu",
+    minimumWidth: 448,
+    minimumHeight: 176
+  });
 
   const hidden = await overlayWindow.webContents.executeJavaScript(
     'getComputedStyle(document.querySelector("main")).visibility'

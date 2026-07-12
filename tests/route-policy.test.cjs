@@ -57,6 +57,44 @@ test("sidebar preload resolves nested targets through the full actionable-contro
   );
 });
 
+test("Upgrade classification precedes native menu actions with a defensive exclusion", () => {
+  const preloadSource = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "sidebar-shape-preload-v4.5.4.js"
+    ),
+    "utf8"
+  );
+  const pointerHandler = preloadSource.slice(
+    preloadSource.indexOf("function handlePointerDown"),
+    preloadSource.indexOf("function handleClick")
+  );
+  const clickHandler = preloadSource.slice(
+    preloadSource.indexOf("function handleClick"),
+    preloadSource.indexOf("function handleKeyDown")
+  );
+
+  for (const handler of [pointerHandler, clickHandler]) {
+    assert(
+      handler.indexOf("isUpgradeControl(event.target)") <
+        handler.indexOf("isOverlayOnlyControl(event.target)")
+    );
+    assert(
+      handler.indexOf("isOverlayOnlyControl(event.target)") <
+        handler.indexOf("isNativeMenuAction(event.target)")
+    );
+  }
+  assert(
+    pointerHandler.indexOf("isNativeMenuAction(event.target)") <
+      pointerHandler.indexOf("reportProjectActionCandidate(event.target)")
+  );
+  assert.match(
+    preloadSource,
+    /function isNativeMenuAction\(target\)[\s\S]*?control\.matches\('\[role="menuitem"\]'\) &&\s*!isUpgradeControl\(control\)/
+  );
+});
+
 test("pointerdown creates a candidate while its following click never clears it", () => {
   const input = {
     controlKind: "button",
@@ -80,6 +118,20 @@ test("pointerdown creates a candidate while its following click never clears it"
   assertAction(pointerResult, "create-project-intent");
   assertAction(clickResult, "ignore-control");
   assert.notEqual(clickResult.action, "clear-project-intent");
+});
+
+test("a native menuitem is not a Project action candidate", () => {
+  assertAction(decideProjectActionCandidate({
+    phase: "pointerdown",
+    controlKind: "menuitem",
+    hasAnchor: false,
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  }), "ignore-control");
 });
 
 test("Settings, dialogs, anchors, backdrops, close, and external controls never create candidates", () => {

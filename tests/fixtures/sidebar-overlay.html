@@ -11,6 +11,28 @@
     #fixture-backdrop { display: none; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
     #project-dialog { position: absolute; left: 350px; top: 80px; width: 520px; height: 300px; background: #333; border-radius: 12px; }
     #project-dialog textarea { width: 420px; height: 120px; }
+    #project-root-row { position: relative; height: 42px; }
+    #fixture-account-menu { position: absolute; left: 280px; top: 80px; width: 190px; background: #222; }
+    #fixture-upgrade-surface { position: absolute; left: 420px; top: 120px; width: 520px; height: 420px; background: #333; }
+    #fixture-confirmation,
+    [data-radix-alert-dialog-content] {
+      position: absolute;
+      left: 440px;
+      top: 270px;
+      background: #333;
+      border-radius: 12px;
+    }
+    #fixture-confirmation-wrapper {
+      position: absolute;
+      inset: 0;
+    }
+    #fixture-confirmation-portal {
+      position: absolute;
+      inset: 0;
+    }
+    #fixture-confirmation-portal[aria-hidden="true"] {
+      display: none;
+    }
     main { position: absolute; left: 260px; top: 0; width: 940px; height: 800px; }
   </style>
 </head>
@@ -31,6 +53,16 @@
     <button id="project-new-chat">new</button>
     <button id="project-settings" aria-label="Settings">settings</button>
     <button id="project-settings-missing" aria-label="Settings">settings missing</button>
+    <button id="account-menu" aria-haspopup="menu" aria-expanded="false">account</button>
+    <button id="plain-dialog-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="plain-role-dialog">plain</button>
+    <button id="delayed-dialog-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="delayed-plain-role-dialog">delayed</button>
+    <button id="ancestor-dialog-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="ancestor-visible-role-dialog">ancestor</button>
+    <div id="project-root-row">
+      project root
+      <button id="project-root-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="radix-wrapper">
+        <svg><path id="project-root-menu-path" d="M0 0"></path></svg>
+      </button>
+    </div>
   </div>
   <main id="workspace">workspace</main>
   <div id="fixture-backdrop"></div>
@@ -43,17 +75,168 @@
       const menu = document.createElement("div");
       menu.id = "fixture-menu";
       menu.setAttribute("role", "menu");
-      menu.innerHTML = '<button role="menuitem">item</button>';
+      menu.dataset.confirmationVariant =
+        button.dataset.confirmationVariant || "role-alertdialog";
+      menu.innerHTML = '<button id="fixture-destructive-action" role="menuitem">action</button>';
       document.body.appendChild(menu);
       button.setAttribute("aria-expanded", "true");
     };
-    for (const id of ["conversation-menu", "project-menu"]) {
+    const openAccountMenu = () => {
+      document.getElementById("fixture-account-menu")?.remove();
+      const menu = document.createElement("div");
+      menu.id = "fixture-account-menu";
+      menu.setAttribute("role", "menu");
+      menu.innerHTML = [
+        '<button id="fixture-upgrade-action" role="menuitem" aria-label="Upgrade plan">action</button>',
+        '<button id="fixture-ordinary-action" role="menuitem">ordinary</button>'
+      ].join("");
+      document.body.appendChild(menu);
+      document.getElementById("account-menu").setAttribute("aria-expanded", "true");
+    };
+    document.getElementById("account-menu").addEventListener("click", (event) => {
+      event.preventDefault();
+      openAccountMenu();
+    });
+    document.getElementById("conversation-menu").dataset.confirmationVariant =
+      "role-alertdialog";
+    document.getElementById("project-menu").dataset.confirmationVariant =
+      "aria-modal";
+    for (const id of [
+      "conversation-menu",
+      "project-menu",
+      "project-root-menu",
+      "plain-dialog-menu",
+      "delayed-dialog-menu",
+      "ancestor-dialog-menu"
+    ]) {
       document.getElementById(id).addEventListener("click", (event) => {
         event.stopPropagation();
         event.preventDefault();
         openMenu(event.currentTarget);
       });
     }
+    const clearConfirmation = () => {
+      document.getElementById("fixture-confirmation")?.remove();
+      document.getElementById("fixture-confirmation-wrapper")?.remove();
+      document.getElementById("fixture-confirmation-portal")?.remove();
+      document.getElementById("fixture-backdrop").style.display = "none";
+    };
+    const addConfirmationButtons = (surface) => {
+      surface.innerHTML = [
+        '<button data-fixture-result="cancel">cancel</button>',
+        '<button data-fixture-result="confirm">confirm</button>'
+      ].join("");
+    };
+    const createPlainRoleDialog = () => {
+      const surface = document.createElement("section");
+      surface.id = "fixture-confirmation";
+      surface.setAttribute("role", "dialog");
+      surface.style.width = "448px";
+      surface.style.height = "176px";
+      surface.style.display = "flex";
+      surface.style.opacity = "1";
+      surface.style.pointerEvents = "auto";
+      addConfirmationButtons(surface);
+      const extraControl = document.createElement("button");
+      extraControl.type = "button";
+      extraControl.dataset.fixtureAuxiliary = "true";
+      surface.appendChild(extraControl);
+      return surface;
+    };
+    const showConfirmation = (variant) => {
+      clearConfirmation();
+      document.getElementById("fixture-backdrop").style.display = "block";
+
+      if (variant === "delayed-plain-role-dialog") {
+        setTimeout(() => {
+          document.body.appendChild(createPlainRoleDialog());
+        }, 650);
+        return;
+      }
+
+      if (variant === "ancestor-visible-role-dialog") {
+        const portal = document.createElement("div");
+        portal.id = "fixture-confirmation-portal";
+        portal.className = "fixture-hidden-portal";
+        portal.setAttribute("aria-hidden", "true");
+        portal.appendChild(createPlainRoleDialog());
+        document.body.appendChild(portal);
+        setTimeout(() => {
+          portal.className = "fixture-visible-portal";
+          portal.style.display = "block";
+          portal.setAttribute("aria-hidden", "false");
+        }, 650);
+        return;
+      }
+
+      if (variant === "plain-role-dialog") {
+        document.body.appendChild(createPlainRoleDialog());
+        return;
+      }
+
+      if (variant === "radix-wrapper") {
+        const wrapper = document.createElement("div");
+        wrapper.id = "fixture-confirmation-wrapper";
+        wrapper.setAttribute("role", "alertdialog");
+        const surface = document.createElement("section");
+        surface.id = "fixture-confirmation";
+        surface.setAttribute("data-radix-alert-dialog-content", "");
+        surface.style.width = "300px";
+        surface.style.height = "150px";
+        addConfirmationButtons(surface);
+        wrapper.appendChild(surface);
+        document.body.appendChild(wrapper);
+        return;
+      }
+
+      const surface = document.createElement("section");
+      surface.id = "fixture-confirmation";
+      if (variant === "aria-modal") {
+        surface.setAttribute("aria-modal", "true");
+        surface.style.width = "280px";
+        surface.style.height = "140px";
+      } else {
+        surface.setAttribute("role", "alertdialog");
+        surface.style.width = "320px";
+        surface.style.height = "160px";
+      }
+      addConfirmationButtons(surface);
+      document.body.appendChild(surface);
+    };
+    document.addEventListener("click", (event) => {
+      if (event.target.id === "fixture-upgrade-action") {
+        window.fixtureUpgradeNativeClickCount =
+          Number(window.fixtureUpgradeNativeClickCount || 0) + 1;
+        document.getElementById("fixture-account-menu")?.remove();
+        setTimeout(() => {
+          const surface = document.createElement("section");
+          surface.id = "fixture-upgrade-surface";
+          surface.setAttribute("role", "dialog");
+          surface.innerHTML = '<button id="fixture-upgrade-close" aria-label="Close">x</button>';
+          document.body.appendChild(surface);
+        }, 100);
+        return;
+      }
+      if (event.target.id === "fixture-ordinary-action") {
+        window.fixtureOrdinaryNativeClickCount =
+          Number(window.fixtureOrdinaryNativeClickCount || 0) + 1;
+        return;
+      }
+      if (event.target.id === "fixture-upgrade-close") {
+        document.getElementById("fixture-upgrade-surface")?.remove();
+        return;
+      }
+      if (event.target.id === "fixture-destructive-action") {
+        const variant = event.target.closest('[role="menu"]')
+          ?.dataset.confirmationVariant;
+        document.getElementById("fixture-menu")?.remove();
+        showConfirmation(variant);
+        return;
+      }
+      if (event.target.matches("[data-fixture-result]")) {
+        clearConfirmation();
+      }
+    });
     document.getElementById("project-settings").addEventListener("click", () => {
       document.getElementById("fixture-backdrop").style.display = "block";
       setTimeout(() => {

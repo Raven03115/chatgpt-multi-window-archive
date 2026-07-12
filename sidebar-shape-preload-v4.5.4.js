@@ -6,12 +6,18 @@ const MAX_RECTS = 24;
 const SMALL_POPUP_PADDING = 3;
 const LARGE_DIALOG_PADDING = 1;
 const MIN_RECT_SIZE = 4;
+const MIN_COMPACT_DIALOG_WIDTH = 240;
+const MIN_COMPACT_DIALOG_HEIGHT = 100;
+const MIN_STANDARD_DIALOG_WIDTH = 340;
+const MIN_STANDARD_DIALOG_HEIGHT = 190;
 const MERGE_GAP = 3;
 
 const DIALOG_ROOT_SELECTORS = [
+  '[role="alertdialog"]',
   '[role="dialog"]',
   '[aria-modal="true"]',
   'dialog[open]',
+  '[data-radix-alert-dialog-content]',
   '[data-radix-dialog-content]',
   '[data-testid*="dialog"]',
   '[data-testid*="modal"]'
@@ -120,6 +126,7 @@ let popupResizeObserver = null;
 let observedDialogSurface = null;
 let observedPopupSurfaces = new Set();
 let reportAnimationFrame = null;
+let interactionReportTimers = new Set();
 let started = false;
 let lastSignature = "";
 let lastDialogRectSignature = "";
@@ -133,22 +140,31 @@ function reportDiagnostic(event) {
 }
 
 function isVisible(element) {
-  if (!(element instanceof Element)) {
+  if (
+    !(element instanceof Element) ||
+    !element.isConnected
+  ) {
     return false;
   }
-
-  const style =
-    window.getComputedStyle(element);
 
   const rect =
     element.getBoundingClientRect();
 
-  if (
-    style.display === "none" ||
-    style.visibility === "hidden" ||
-    Number(style.opacity) === 0
+  for (
+    let current = element;
+    current;
+    current = current.parentElement
   ) {
-    return false;
+    const style =
+      window.getComputedStyle(current);
+
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      return false;
+    }
   }
 
   return (
@@ -296,37 +312,66 @@ function hasCloseControl(element) {
   );
 }
 
-function isReasonableDialogSurface(
+function getDialogSurfaceKind(
   element,
-  rect
+  rect,
+  root
 ) {
   if (!isVisible(element)) {
-    return false;
+    return "non-dialog";
   }
 
   if (
     rect.right <=
     SIDEBAR_WIDTH + 1
   ) {
-    return false;
-  }
-
-  if (
-    rect.width < 340 ||
-    rect.height < 190
-  ) {
-    return false;
+    return "non-dialog";
   }
 
   if (isNearlyFullscreen(rect)) {
-    return false;
+    return "invalid-wrapper";
   }
 
   if (!hasInteractiveContent(element)) {
-    return false;
+    return "non-dialog";
   }
 
-  return true;
+  const role = String(
+    element.getAttribute("role") || ""
+  ).toLowerCase();
+  const hasExplicitRootSemantic =
+    element === root &&
+    (
+      role === "dialog" ||
+      role === "alertdialog" ||
+      element.getAttribute("aria-modal") === "true" ||
+      element.matches("dialog[open]") ||
+      element.matches("[data-radix-dialog-content]") ||
+      element.matches(
+        "[data-radix-alert-dialog-content]"
+      )
+    );
+  const meetsCompactSize =
+    rect.width >= MIN_COMPACT_DIALOG_WIDTH &&
+    rect.height >= MIN_COMPACT_DIALOG_HEIGHT;
+  const meetsStandardSize =
+    rect.width >= MIN_STANDARD_DIALOG_WIDTH &&
+    rect.height >= MIN_STANDARD_DIALOG_HEIGHT;
+
+  if (
+    meetsCompactSize &&
+    hasOpaqueBackground(element) &&
+    hasExplicitRootSemantic &&
+    !meetsStandardSize
+  ) {
+    return "compact-confirmation";
+  }
+
+  if (!meetsStandardSize) {
+    return "non-dialog";
+  }
+
+  return "standard-dialog";
 }
 
 function dialogSurfaceScore(
@@ -351,6 +396,10 @@ function dialogSurfaceScore(
     score += 90;
   }
 
+  if (role === "alertdialog") {
+    score += 130;
+  }
+
   if (
     element.getAttribute(
       "aria-modal"
@@ -365,6 +414,14 @@ function dialogSurfaceScore(
     )
   ) {
     score += 100;
+  }
+
+  if (
+    element.matches(
+      "[data-radix-alert-dialog-content]"
+    )
+  ) {
+    score += 140;
   }
 
   if (
@@ -534,12 +591,15 @@ function findBestDialogSurface() {
       }
 
       const rect = getRect(element);
+      const kind = getDialogSurfaceKind(
+        element,
+        rect,
+        root
+      );
 
       if (
-        !isReasonableDialogSurface(
-          element,
-          rect
-        )
+        kind !== "standard-dialog" &&
+        kind !== "compact-confirmation"
       ) {
         continue;
       }
@@ -547,6 +607,7 @@ function findBestDialogSurface() {
       results.push({
         element,
         rect,
+        kind,
         score: dialogSurfaceScore(
           element,
           rect,
@@ -561,6 +622,18 @@ function findBestDialogSurface() {
   }
 
   results.sort((a, b) => {
+    const kindPriority = {
+      "compact-confirmation": 2,
+      "standard-dialog": 1
+    };
+    const priorityDifference =
+      kindPriority[b.kind] -
+      kindPriority[a.kind];
+
+    if (priorityDifference !== 0) {
+      return priorityDifference;
+    }
+
     if (b.score !== a.score) {
       return b.score - a.score;
     }
@@ -575,6 +648,7 @@ function findBestDialogSurface() {
 
   return {
     element: best.element,
+    kind: best.kind,
     rect: normalizeRawRect(
       best.rect,
       LARGE_DIALOG_PADDING
@@ -811,6 +885,8 @@ function reportShapeState() {
     findBestDialogSurface();
   const dialogRect =
     dialogSurface?.rect || null;
+  const dialogKind =
+    dialogSurface?.kind || null;
   const popupSurfaces =
     collectSmallPopupSurfaces(
       dialogRect
@@ -864,6 +940,7 @@ function reportShapeState() {
 
   const payload = {
     dialogRect,
+    dialogKind,
     popupRects
   };
 
@@ -1111,6 +1188,16 @@ function getControlKind(control) {
   return "other";
 }
 
+function isNativeMenuAction(target) {
+  const control = getControlElement(target);
+
+  return Boolean(
+    control &&
+    control.matches('[role="menuitem"]') &&
+    !isUpgradeControl(control)
+  );
+}
+
 function isMenuTriggerControl(control) {
   if (!(control instanceof Element)) {
     return false;
@@ -1180,6 +1267,10 @@ function reportProjectActionCandidate(target) {
   }
 
   if (isMenuTriggerControl(control)) {
+    return false;
+  }
+
+  if (control.matches('[role="menuitem"]')) {
     return false;
   }
 
@@ -1394,9 +1485,7 @@ function mutationMayAffectShape(record) {
   }
 
   if (record.type === "attributes") {
-    return matchesOrIsInsideShapeUi(
-      record.target
-    );
+    return mayContainShapeUi(record.target);
   }
 
   if (
@@ -1411,8 +1500,24 @@ function mutationMayAffectShape(record) {
   ].some(mayContainShapeUi);
 }
 
+function clearReportBurstTimers() {
+  for (const timer of interactionReportTimers) {
+    clearTimeout(timer);
+  }
+  interactionReportTimers.clear();
+}
+
 function scheduleReportBurst() {
+  clearReportBurstTimers();
   scheduleFrameReport();
+
+  for (const delay of [125, 375, 750]) {
+    const timer = setTimeout(() => {
+      interactionReportTimers.delete(timer);
+      scheduleFrameReport();
+    }, delay);
+    interactionReportTimers.add(timer);
+  }
 }
 
 function handlePointerDown(event) {
@@ -1424,6 +1529,8 @@ function handlePointerDown(event) {
     isOverlayOnlyControl(event.target)
   ) {
     notifyOverlayOnlyIntent();
+  } else if (isNativeMenuAction(event.target)) {
+    // Preserve native popup actions without creating Project intent.
   } else if (
     reportProjectActionCandidate(event.target)
   ) {
@@ -1439,7 +1546,7 @@ function handlePointerDown(event) {
     notifyFullscreenOverlayIntent(false);
   }
 
-  scheduleReportBurst();
+  scheduleFrameReport();
 }
 
 function handleClick(event) {
@@ -1453,13 +1560,19 @@ function handleClick(event) {
     isOverlayOnlyControl(event.target)
   ) {
     notifyOverlayOnlyIntent();
+  } else if (isNativeMenuAction(event.target)) {
+    // The official popup action owns its native click behavior.
   } else if (
     !interceptExternalRoute(event)
   ) {
     reportRouteIntent(event.target);
   }
 
-  scheduleReportBurst();
+  if (control) {
+    scheduleReportBurst();
+  } else {
+    scheduleFrameReport();
+  }
 }
 
 function handleKeyDown(event) {
@@ -1468,7 +1581,9 @@ function handleKeyDown(event) {
     notifyFullscreenOverlayIntent(false);
   }
 
-  scheduleReportBurst();
+  if (event.key === "Escape") {
+    scheduleReportBurst();
+  }
 }
 
 function startDetection() {
@@ -1492,8 +1607,18 @@ function startDetection() {
 
   observer = new MutationObserver((records) => {
     installOverlayIsolationStyle();
+    const checkedAttributeTargets = new Set();
 
-    if (records.some(mutationMayAffectShape)) {
+    if (records.some((record) => {
+      if (record.type === "attributes") {
+        if (checkedAttributeTargets.has(record.target)) {
+          return false;
+        }
+        checkedAttributeTargets.add(record.target);
+      }
+
+      return mutationMayAffectShape(record);
+    })) {
       scheduleFrameReport();
     }
   });
@@ -1557,10 +1682,10 @@ function startDetection() {
 
   window.addEventListener(
     "resize",
-    scheduleReportBurst
+    scheduleFrameReport
   );
 
-  scheduleReportBurst();
+  scheduleFrameReport();
 }
 
 if (document.readyState === "loading") {
@@ -1595,6 +1720,8 @@ window.addEventListener(
       cancelAnimationFrame(reportAnimationFrame);
       reportAnimationFrame = null;
     }
+
+    clearReportBurstTimers();
 
     observedDialogSurface = null;
     observedPopupSurfaces.clear();

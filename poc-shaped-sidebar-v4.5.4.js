@@ -24,7 +24,7 @@ const {
   buildOverlayShape,
   classifyOverlayControl,
   decideOverlayControl,
-  replaceDialogRect,
+  replaceDialogSurfaceState,
   replacePopupRects,
   transitionOverlayState
 } = require("./lib/overlay-policy.cjs");
@@ -3639,6 +3639,14 @@ ipcMain.on(
         state?.dialogRect,
         bounds
       );
+    const nextDialogKind =
+      state?.dialogKind ===
+        "compact-confirmation"
+        ? "compact-confirmation"
+        : state?.dialogKind ===
+            "standard-dialog"
+          ? "standard-dialog"
+          : null;
 
     const previousPopupCount = popupRects.length;
     popupRects = replacePopupRects(
@@ -3675,10 +3683,21 @@ ipcMain.on(
         suppressDialogLockUntil
     ) {
       const previousDialogRect = lockedDialogRect;
-      lockedDialogRect = replaceDialogRect(
-        lockedDialogRect,
-        nextDialogRect
-      );
+      const nextSurfaceState =
+        replaceDialogSurfaceState(
+          {
+            dialogRect: lockedDialogRect,
+            popupRects
+          },
+          {
+            kind: nextDialogKind,
+            rect: nextDialogRect
+          }
+        );
+      lockedDialogRect =
+        nextSurfaceState.dialogRect;
+      popupRects =
+        nextSurfaceState.popupRects;
       clearOverlayPendingTimer();
 
       if (!fullscreenOverlayMode) {
