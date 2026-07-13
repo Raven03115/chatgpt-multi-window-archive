@@ -11,6 +11,7 @@ const MIN_COMPACT_DIALOG_HEIGHT = 100;
 const MIN_STANDARD_DIALOG_WIDTH = 340;
 const MIN_STANDARD_DIALOG_HEIGHT = 190;
 const MERGE_GAP = 3;
+const SETTINGS_OUTSIDE_CLICK_MAX_DISTANCE = 8;
 
 const DIALOG_ROOT_SELECTORS = [
   '[role="alertdialog"]',
@@ -131,6 +132,13 @@ let started = false;
 let lastSignature = "";
 let lastDialogRectSignature = "";
 let lastPopupRectsSignature = "[]";
+let activeOverlayOnlyKind = null;
+let overlayDialogObserved = false;
+let currentDialogRect = null;
+let currentPopupRects = [];
+let settingsOutsidePointerGesture = null;
+let pointerGestureId = 0;
+let pointerGestureSnapshot = null;
 
 function reportDiagnostic(event) {
   ipcRenderer.send(
@@ -893,6 +901,21 @@ function reportShapeState() {
     );
   const popupRects = popupSurfaces.rects;
 
+  currentDialogRect = dialogRect;
+  currentPopupRects = popupRects;
+
+  if (activeOverlayOnlyKind && dialogRect) {
+    overlayDialogObserved = true;
+  } else if (
+    activeOverlayOnlyKind &&
+    overlayDialogObserved &&
+    !dialogRect
+  ) {
+    activeOverlayOnlyKind = null;
+    overlayDialogObserved = false;
+    settingsOutsidePointerGesture = null;
+  }
+
   syncDialogResizeObserver(
     dialogSurface?.element || null
   );
@@ -1383,11 +1406,11 @@ function isUpgradeControl(target) {
   );
 }
 
-function isOverlayOnlyControl(target) {
+function getOverlayOnlyControlKind(target) {
   const control = getControlElement(target);
 
   if (!control) {
-    return false;
+    return null;
   }
 
   const normalize = (value) =>
@@ -1396,9 +1419,11 @@ function isOverlayOnlyControl(target) {
       .trim()
       .toLowerCase();
 
-  const exactLabels = new Set([
+  const settingsLabels = new Set([
     "設定",
-    "settings",
+    "settings"
+  ]);
+  const searchLabels = new Set([
     "搜尋對話",
     "搜尋聊天",
     "search chats",
@@ -1417,30 +1442,164 @@ function isOverlayOnlyControl(target) {
     control.getAttribute("data-testid")
   );
 
-  if (
-    semanticLabels.some((label) =>
-      exactLabels.has(label)
-    ) ||
-    exactLabels.has(exactText)
-  ) {
-    return true;
+  if (semanticLabels.some((label) => settingsLabels.has(label)) ||
+      settingsLabels.has(exactText) ||
+      /(?:^|[-_])(settings?|preferences?)(?:$|[-_])/.test(testId)) {
+    return "settings";
   }
 
-  return (
-    /(?:^|[-_])(settings?|preferences?)(?:$|[-_])/.test(testId) ||
-    /(?:^|[-_])search(?:[-_](?:chats?|conversations?))?(?:$|[-_])/.test(testId)
+  if (semanticLabels.some((label) => searchLabels.has(label)) ||
+      searchLabels.has(exactText) ||
+      /(?:^|[-_])search(?:[-_](?:chats?|conversations?))?(?:$|[-_])/.test(testId)) {
+    return "search";
+  }
+
+  return null;
+}
+
+function isOverlayOnlyControl(target) {
+  return Boolean(getOverlayOnlyControlKind(target));
+}
+
+function notifyOverlayOnlyIntent(kind) {
+  if (kind !== "settings" && kind !== "search") {
+    return;
+  }
+
+  if (activeOverlayOnlyKind !== kind) {
+    overlayDialogObserved = false;
+    settingsOutsidePointerGesture = null;
+  }
+
+  activeOverlayOnlyKind = kind;
+  ipcRenderer.send(
+    "chatgpt-sidebar-overlay-only-intent",
+    { kind }
   );
 }
 
-function notifyOverlayOnlyIntent() {
+function pointIsInsideRect(x, y, rect) {
+  return Boolean(
+    rect &&
+    x >= rect.x &&
+    y >= rect.y &&
+    x < rect.x + rect.width &&
+    y < rect.y + rect.height
+  );
+}
+
+function pointIsInsideOverlaySurface(x, y) {
+  return (
+    pointIsInsideRect(x, y, currentDialogRect) ||
+    currentPopupRects.some((rect) =>
+      pointIsInsideRect(x, y, rect)
+    )
+  );
+}
+
+function isPrimaryTrustedPointer(event) {
+  return (
+    event.isTrusted === true &&
+    event.button === 0 &&
+    event.isPrimary !== false &&
+    Number.isInteger(event.pointerId)
+  );
+}
+
+function stopSettingsOutsideGesture(event) {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+function handleSettingsOutsidePointerDown(event) {
+  if (
+    activeOverlayOnlyKind !== "settings" ||
+    !isPrimaryTrustedPointer(event) ||
+    event.clientX <= SIDEBAR_WIDTH ||
+    pointIsInsideOverlaySurface(event.clientX, event.clientY)
+  ) {
+    return;
+  }
+
+  settingsOutsidePointerGesture = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    readyForClick: false
+  };
+  stopSettingsOutsideGesture(event);
+}
+
+function handleSettingsOutsidePointerUp(event) {
+  const gesture = settingsOutsidePointerGesture;
+
+  if (!gesture) {
+    return;
+  }
+
+  const distance = Math.hypot(
+    event.clientX - gesture.startX,
+    event.clientY - gesture.startY
+  );
+  const valid =
+    isPrimaryTrustedPointer(event) &&
+    event.pointerId === gesture.pointerId &&
+    distance <= SETTINGS_OUTSIDE_CLICK_MAX_DISTANCE &&
+    event.clientX > SIDEBAR_WIDTH &&
+    !pointIsInsideOverlaySurface(event.clientX, event.clientY);
+
+  if (!valid) {
+    settingsOutsidePointerGesture = null;
+    return;
+  }
+
+  gesture.readyForClick = true;
+  stopSettingsOutsideGesture(event);
+}
+
+function handleSettingsOutsideClick(event) {
+  const gesture = settingsOutsidePointerGesture;
+
+  if (
+    !gesture ||
+    !gesture.readyForClick ||
+    activeOverlayOnlyKind !== "settings" ||
+    event.isTrusted !== true ||
+    event.button !== 0
+  ) {
+    return;
+  }
+
+  const distance = Math.hypot(
+    event.clientX - gesture.startX,
+    event.clientY - gesture.startY
+  );
+
+  if (
+    distance > SETTINGS_OUTSIDE_CLICK_MAX_DISTANCE ||
+    event.clientX <= SIDEBAR_WIDTH ||
+    pointIsInsideOverlaySurface(event.clientX, event.clientY)
+  ) {
+    settingsOutsidePointerGesture = null;
+    return;
+  }
+
+  settingsOutsidePointerGesture = null;
+  stopSettingsOutsideGesture(event);
   ipcRenderer.send(
-    "chatgpt-sidebar-overlay-only-intent"
+    "chatgpt-sidebar-settings-outside-click"
   );
 }
 
 function notifyFullscreenOverlayIntent(
   enabled
 ) {
+  if (enabled) {
+    activeOverlayOnlyKind = null;
+    overlayDialogObserved = false;
+    settingsOutsidePointerGesture = null;
+  }
+
   ipcRenderer.send(
     "chatgpt-sidebar-fullscreen-overlay-intent",
     Boolean(enabled)
@@ -1520,16 +1679,81 @@ function scheduleReportBurst() {
   }
 }
 
-function handlePointerDown(event) {
-  if (reportMenuTrigger(event.target)) {
-    // Preserve the official menu handler without routing the row anchor.
-  } else if (isUpgradeControl(event.target)) {
-    notifyFullscreenOverlayIntent(true);
-  } else if (
-    isOverlayOnlyControl(event.target)
+function createPointerGestureSnapshot(event) {
+  const control = getControlElement(event.target);
+  const closeControl = isCloseControl(event.target);
+  const upgradeControl =
+    !closeControl && isUpgradeControl(event.target);
+
+  pointerGestureId += 1;
+
+  return {
+    gestureId: pointerGestureId,
+    pointerId: Number.isInteger(event.pointerId)
+      ? event.pointerId
+      : null,
+    control,
+    hasControl: Boolean(control),
+    closeControl,
+    upgradeControl,
+    overlaySurface:
+      matchesOrIsInsideShapeUi(event.target),
+    nativeMenu: isNativeMenuAction(event.target),
+    menuTrigger: Boolean(
+      control && isMenuTriggerControl(control)
+    ),
+    overlayOnlyKind:
+      closeControl || upgradeControl
+        ? null
+        : getOverlayOnlyControlKind(event.target),
+    pointerUpCompleted: false
+  };
+}
+
+function handlePointerUp(event) {
+  const snapshot = pointerGestureSnapshot;
+
+  if (!snapshot) {
+    return;
+  }
+
+  if (
+    snapshot.pointerId === null ||
+    event.pointerId !== snapshot.pointerId ||
+    event.button !== 0
   ) {
-    notifyOverlayOnlyIntent();
-  } else if (isNativeMenuAction(event.target)) {
+    pointerGestureSnapshot = null;
+    return;
+  }
+
+  snapshot.pointerUpCompleted = true;
+}
+
+function handlePointerCancel(event) {
+  if (
+    pointerGestureSnapshot &&
+    event.pointerId === pointerGestureSnapshot.pointerId
+  ) {
+    pointerGestureSnapshot = null;
+  }
+}
+
+function handlePointerDown(event) {
+  const snapshot = createPointerGestureSnapshot(event);
+  pointerGestureSnapshot = snapshot;
+
+  if (snapshot.closeControl) {
+    scheduleFrameReport();
+    return;
+  }
+
+  if (snapshot.menuTrigger && reportMenuTrigger(event.target)) {
+    // Preserve the official menu handler without routing the row anchor.
+  } else if (snapshot.upgradeControl) {
+    notifyFullscreenOverlayIntent(true);
+  } else if (snapshot.overlayOnlyKind) {
+    notifyOverlayOnlyIntent(snapshot.overlayOnlyKind);
+  } else if (snapshot.nativeMenu) {
     // Preserve native popup actions without creating Project intent.
   } else if (
     reportProjectActionCandidate(event.target)
@@ -1541,25 +1765,55 @@ function handlePointerDown(event) {
     reportRouteIntent(event.target);
   }
 
-  if (isCloseControl(event.target)) {
-    notifyCloseIntent();
-    notifyFullscreenOverlayIntent(false);
-  }
-
   scheduleFrameReport();
 }
 
 function handleClick(event) {
+  const snapshot = pointerGestureSnapshot;
+  const completedPointerGesture = Boolean(
+    snapshot && snapshot.pointerUpCompleted
+  );
+
+  pointerGestureSnapshot = null;
+
+  if (completedPointerGesture) {
+    if (snapshot.closeControl) {
+      const originalControlStillOwnsClick = Boolean(
+        snapshot.control &&
+        snapshot.control.isConnected &&
+        (
+          event.target === snapshot.control ||
+          snapshot.control.contains(event.target)
+        )
+      );
+
+      notifyCloseIntent();
+
+      if (!originalControlStillOwnsClick) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }
+
+    if (snapshot.hasControl) {
+      scheduleReportBurst();
+    } else {
+      scheduleFrameReport();
+    }
+
+    return;
+  }
+
   const control = getControlElement(event.target);
+  const overlayOnlyKind =
+    getOverlayOnlyControlKind(event.target);
 
   if (control && isMenuTriggerControl(control)) {
     // The official click handler owns menu visibility.
   } else if (isUpgradeControl(event.target)) {
     notifyFullscreenOverlayIntent(true);
-  } else if (
-    isOverlayOnlyControl(event.target)
-  ) {
-    notifyOverlayOnlyIntent();
+  } else if (overlayOnlyKind) {
+    notifyOverlayOnlyIntent(overlayOnlyKind);
   } else if (isNativeMenuAction(event.target)) {
     // The official popup action owns its native click behavior.
   } else if (
@@ -1576,6 +1830,8 @@ function handleClick(event) {
 }
 
 function handleKeyDown(event) {
+  pointerGestureSnapshot = null;
+
   if (event.key === "Escape") {
     notifyCloseIntent();
     notifyFullscreenOverlayIntent(false);
@@ -1642,6 +1898,36 @@ function startDetection() {
         "style"
       ]
     }
+  );
+
+  document.addEventListener(
+    "pointerdown",
+    handleSettingsOutsidePointerDown,
+    true
+  );
+
+  document.addEventListener(
+    "pointerup",
+    handleSettingsOutsidePointerUp,
+    true
+  );
+
+  document.addEventListener(
+    "pointerup",
+    handlePointerUp,
+    true
+  );
+
+  document.addEventListener(
+    "pointercancel",
+    handlePointerCancel,
+    true
+  );
+
+  document.addEventListener(
+    "click",
+    handleSettingsOutsideClick,
+    true
   );
 
   document.addEventListener(
@@ -1723,6 +2009,7 @@ window.addEventListener(
 
     clearReportBurstTimers();
 
+    pointerGestureSnapshot = null;
     observedDialogSurface = null;
     observedPopupSurfaces.clear();
   }

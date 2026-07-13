@@ -93,6 +93,17 @@ test("overlay shape includes sidebar, dialog, and popup but never workspace rect
   ]);
 });
 
+test("explicit overlay-only modal captures the complete workspace immediately", () => {
+  const shape = buildOverlayShape({
+    mode: "overlay-intent-pending",
+    bounds: { width: 1200, height: 800 },
+    sidebarWidth: 260,
+    captureWorkspaceInput: true
+  });
+
+  assert.deepEqual(shape, [rect(0, 0, 1200, 800)]);
+});
+
 test("pending dialog succeeds only after a surface is detected", () => {
   const pending = transitionOverlayState(
     { mode: "sidebar-only", generation: 0 },
@@ -103,7 +114,9 @@ test("pending dialog succeeds only after a surface is detected", () => {
   });
 
   assert.equal(pending.mode, "overlay-intent-pending");
+  assert.equal(pending.overlayOnlyModal, true);
   assert.equal(detected.mode, "shaped-dialog");
+  assert.equal(detected.overlayOnlyModal, true);
   assert.equal(detected.mainWorkspaceVisible, false);
 });
 
@@ -117,6 +130,7 @@ test("missing dialog returns pending state to sidebar without fullscreen or gray
   });
 
   assert.equal(missing.mode, "sidebar-only");
+  assert.equal(missing.overlayOnlyModal, false);
   assert.equal(missing.suppressPanes, false);
   assert.equal(missing.mainWorkspaceVisible, false);
 });
@@ -131,6 +145,7 @@ test("closing a pending overlay cancels it without pane suppression", () => {
   });
 
   assert.equal(cancelled.mode, "sidebar-only");
+  assert.equal(cancelled.overlayOnlyModal, false);
   assert.equal(cancelled.suppressPanes, false);
   assert.equal(cancelled.mainWorkspaceVisible, false);
 });
@@ -370,5 +385,6 @@ test("confirmation shape contains sidebar and modal only and never enables fulls
     rect(440, 270, 320, 160)
   ]);
   assert.equal(state.mode, "shaped-dialog");
+  assert.equal(state.overlayOnlyModal, false);
   assert.equal(state.mainWorkspaceVisible, false);
 });

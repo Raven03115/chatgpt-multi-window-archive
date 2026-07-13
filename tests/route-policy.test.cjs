@@ -57,7 +57,7 @@ test("sidebar preload resolves nested targets through the full actionable-contro
   );
 });
 
-test("Upgrade classification precedes native menu actions with a defensive exclusion", () => {
+test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu actions", () => {
   const preloadSource = fs.readFileSync(
     path.join(
       __dirname,
@@ -74,20 +74,40 @@ test("Upgrade classification precedes native menu actions with a defensive exclu
     preloadSource.indexOf("function handleClick"),
     preloadSource.indexOf("function handleKeyDown")
   );
+  const snapshotBuilder = preloadSource.slice(
+    preloadSource.indexOf("function createPointerGestureSnapshot"),
+    preloadSource.indexOf("function handlePointerUp")
+  );
 
-  for (const handler of [pointerHandler, clickHandler]) {
-    assert(
-      handler.indexOf("isUpgradeControl(event.target)") <
-        handler.indexOf("isOverlayOnlyControl(event.target)")
-    );
-    assert(
-      handler.indexOf("isOverlayOnlyControl(event.target)") <
-        handler.indexOf("isNativeMenuAction(event.target)")
-    );
-  }
   assert(
-    pointerHandler.indexOf("isNativeMenuAction(event.target)") <
+    snapshotBuilder.indexOf("isCloseControl(event.target)") <
+      snapshotBuilder.indexOf("isUpgradeControl(event.target)")
+  );
+  assert.match(
+    snapshotBuilder,
+    /upgradeControl\s*=\s*!closeControl\s*&&\s*isUpgradeControl\(event\.target\)/
+  );
+  assert(
+    pointerHandler.indexOf("if (snapshot.closeControl)") <
+      pointerHandler.indexOf("else if (snapshot.upgradeControl)")
+  );
+  assert(
+    pointerHandler.indexOf("else if (snapshot.upgradeControl)") <
+      pointerHandler.indexOf("else if (snapshot.nativeMenu)")
+  );
+  assert(
+    pointerHandler.indexOf("else if (snapshot.nativeMenu)") <
       pointerHandler.indexOf("reportProjectActionCandidate(event.target)")
+  );
+  assert(
+    clickHandler.indexOf("if (completedPointerGesture)") <
+      clickHandler.indexOf("isUpgradeControl(event.target)")
+  );
+  assert(
+    clickHandler.indexOf("isUpgradeControl(event.target)") <
+      clickHandler.indexOf("else if (overlayOnlyKind)") &&
+      clickHandler.indexOf("else if (overlayOnlyKind)") <
+        clickHandler.indexOf("isNativeMenuAction(event.target)")
   );
   assert.match(
     preloadSource,

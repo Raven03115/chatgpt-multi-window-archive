@@ -5,6 +5,7 @@ const {
   Menu,
   globalShortcut,
   ipcMain,
+  session,
   shell
 } = require("electron");
 
@@ -20,6 +21,9 @@ const {
 const {
   createDiagnosticsLogger
 } = require("./lib/diagnostics.cjs");
+const {
+  configureAutomationsRequestUserAgent
+} = require("./lib/browser-user-agent.cjs");
 const {
   buildOverlayShape,
   classifyOverlayControl,
@@ -196,6 +200,10 @@ let overlayRuntimeState = transitionOverlayState(
   { mode: "sidebar-only", generation: 0 }
 );
 let overlayPendingTimer = null;
+let fullscreenCloseTimer = null;
+let overlayOnlyIntentKind = null;
+let settingsOutsideEscapeGeneration = null;
+let settingsInjectedEscapeCloseIntentGeneration = null;
 let sidebarRouteForwardSuppressionUntil = 0;
 let panesSuppressedForOverlay = false;
 let lastAppliedOverlayShapeSignature = "";
@@ -1987,6 +1995,13 @@ function applyOverlayRuntimeEvent(event, reason) {
     overlayRuntimeState,
     event
   );
+
+  if (!overlayRuntimeState.overlayOnlyModal) {
+    overlayOnlyIntentKind = null;
+    settingsOutsideEscapeGeneration = null;
+    settingsInjectedEscapeCloseIntentGeneration = null;
+  }
+
   overlayOnlyUiActive =
     overlayRuntimeState.mode === "shaped-dialog";
   fullscreenOverlayMode =
@@ -2033,6 +2048,8 @@ function beginOverlayIntentPending() {
     reason: "explicit-overlay-control"
   });
 
+  applyOverlayShape();
+
   overlayPendingTimer = setTimeout(() => {
     overlayPendingTimer = null;
 
@@ -2061,14 +2078,42 @@ function beginOverlayIntentPending() {
   }, 1500);
 }
 
-function setOverlayOnlyUiActive(active) {
+function setOverlayOnlyUiActive(active, kind = null) {
   if (active) {
+    if (kind === "settings" || kind === "search") {
+      const isNewExplicitIntent =
+        overlayOnlyIntentKind !== kind ||
+        !overlayRuntimeState.overlayOnlyModal;
+      overlayOnlyIntentKind = kind;
+
+      if (isNewExplicitIntent) {
+        settingsOutsideEscapeGeneration = null;
+        settingsInjectedEscapeCloseIntentGeneration = null;
+      }
+    }
+
+    const cancelledFullscreenClose =
+      clearFullscreenCloseTimer();
+
+    if (cancelledFullscreenClose) {
+      sendFullscreenOverlayClass(false);
+    }
+
     if (lockedDialogRect) {
       clearOverlayPendingTimer();
+
+      if (!overlayRuntimeState.overlayOnlyModal) {
+        applyOverlayRuntimeEvent(
+          { type: "overlay-intent" },
+          "explicit-overlay-control-with-existing-dialog"
+        );
+      }
+
       applyOverlayRuntimeEvent(
         { type: "dialog-detected" },
         "existing-dialog-surface"
       );
+      applyOverlayShape();
       return;
     }
 
@@ -2101,7 +2146,46 @@ function sendFullscreenOverlayClass(enabled) {
   );
 }
 
+function clearFullscreenCloseTimer() {
+  if (!fullscreenCloseTimer) {
+    return false;
+  }
+
+  clearTimeout(fullscreenCloseTimer);
+  fullscreenCloseTimer = null;
+  return true;
+}
+
+function scheduleFullscreenOverlayClose() {
+  if (overlayRuntimeState.overlayOnlyModal) {
+    return false;
+  }
+
+  clearFullscreenCloseTimer();
+
+  const generation = overlayRuntimeState.generation;
+
+  fullscreenCloseTimer = setTimeout(() => {
+    fullscreenCloseTimer = null;
+
+    if (
+      overlayRuntimeState.overlayOnlyModal ||
+      overlayRuntimeState.generation !== generation
+    ) {
+      return;
+    }
+
+    closeFullscreenOverlayMode();
+  }, 120);
+
+  return true;
+}
+
 function setFullscreenOverlayMode(enabled) {
+  if (enabled) {
+    clearFullscreenCloseTimer();
+  }
+
   clearOverlayPendingTimer();
   applyOverlayRuntimeEvent(
     enabled
@@ -3032,7 +3116,9 @@ function applyOverlayShape() {
       bounds,
       sidebarWidth: SIDEBAR_WIDTH,
       dialogRect: sanitizedDialog,
-      popupRects: sanitizedPopupRects
+      popupRects: sanitizedPopupRects,
+      captureWorkspaceInput:
+        overlayRuntimeState.overlayOnlyModal
     });
   }
 
@@ -3866,6 +3952,15 @@ ipcMain.on(
 
     clearProjectActionIntent("dialog-close-intent");
 
+    if (
+      overlayOnlyIntentKind === "settings" &&
+      settingsInjectedEscapeCloseIntentGeneration ===
+        overlayRuntimeState.generation
+    ) {
+      settingsInjectedEscapeCloseIntentGeneration = null;
+      return;
+    }
+
     const hadOverlayDialog =
       overlayOnlyUiActive ||
       Boolean(lockedDialogRect) ||
@@ -3893,12 +3988,11 @@ ipcMain.on(
       action: "close-overlay-dialog",
       reason: "confirmed-overlay-dialog"
     });
+    const shouldCloseFullscreen = fullscreenOverlayMode;
     unlockDialogShape(true);
 
-    if (fullscreenOverlayMode) {
-      setTimeout(() => {
-        closeFullscreenOverlayMode();
-      }, 120);
+    if (shouldCloseFullscreen) {
+      scheduleFullscreenOverlayClose();
     }
   }
 );
@@ -4007,7 +4101,7 @@ ipcMain.on(
 
 ipcMain.on(
   "chatgpt-sidebar-overlay-only-intent",
-  (event) => {
+  (event, intent) => {
     if (
       !isUsableWindow(
         sidebarOverlayWindow
@@ -4020,7 +4114,60 @@ ipcMain.on(
 
     clearProjectActionIntent("overlay-only-intent");
 
-    setOverlayOnlyUiActive(true);
+    const kind = intent?.kind === "settings"
+      ? "settings"
+      : intent?.kind === "search"
+        ? "search"
+        : null;
+
+    setOverlayOnlyUiActive(true, kind);
+  }
+);
+
+ipcMain.on(
+  "chatgpt-sidebar-settings-outside-click",
+  (event) => {
+    if (
+      !isUsableWindow(sidebarOverlayWindow) ||
+      event.sender.id !==
+        sidebarOverlayWindow.webContents.id ||
+      overlayOnlyIntentKind !== "settings" ||
+      !overlayRuntimeState.overlayOnlyModal ||
+      fullscreenOverlayMode
+    ) {
+      return;
+    }
+
+    const generation =
+      overlayRuntimeState.generation;
+
+    if (
+      settingsOutsideEscapeGeneration ===
+      generation
+    ) {
+      return;
+    }
+
+    settingsOutsideEscapeGeneration = generation;
+    settingsInjectedEscapeCloseIntentGeneration = generation;
+
+    try {
+      sidebarOverlayWindow.webContents.sendInputEvent({
+        type: "keyDown",
+        keyCode: "ESCAPE"
+      });
+      sidebarOverlayWindow.webContents.sendInputEvent({
+        type: "keyUp",
+        keyCode: "ESCAPE"
+      });
+    } catch (error) {
+      settingsOutsideEscapeGeneration = null;
+      settingsInjectedEscapeCloseIntentGeneration = null;
+      console.error(
+        "[Integration v4.5.7] Settings outside click input failed:",
+        error.message
+      );
+    }
   }
 );
 
@@ -4038,9 +4185,7 @@ ipcMain.on(
     }
 
     if (enabled === false) {
-      setTimeout(() => {
-        closeFullscreenOverlayMode();
-      }, 120);
+      scheduleFullscreenOverlayClose();
 
       return;
     }
@@ -4055,6 +4200,10 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
 
   appConfig = loadConfig();
+
+  configureAutomationsRequestUserAgent(
+    session.fromPartition(CHATGPT_PARTITION)
+  );
 
   console.log(
     "[Integration v4.5.7] Electron:",
@@ -4079,6 +4228,7 @@ app.on("will-quit", () => {
   clearPaneCloseNotice();
   clearProjectActionIntent("app-will-quit");
   clearOverlayPendingTimer();
+  clearFullscreenCloseTimer();
   saveOpenPaneUrls();
   saveConfigNow();
 
@@ -4125,6 +4275,10 @@ app.on("will-quit", () => {
 
   ipcMain.removeAllListeners(
     "chatgpt-sidebar-overlay-only-intent"
+  );
+
+  ipcMain.removeAllListeners(
+    "chatgpt-sidebar-settings-outside-click"
   );
 
   ipcMain.removeAllListeners(

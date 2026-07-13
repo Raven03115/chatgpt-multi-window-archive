@@ -53,6 +53,7 @@
     <button id="project-new-chat">new</button>
     <button id="project-settings" aria-label="Settings">settings</button>
     <button id="project-settings-missing" aria-label="Settings">settings missing</button>
+    <button id="search-control" aria-label="Search chats">search</button>
     <button id="account-menu" aria-haspopup="menu" aria-expanded="false">account</button>
     <button id="plain-dialog-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="plain-role-dialog">plain</button>
     <button id="delayed-dialog-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="delayed-plain-role-dialog">delayed</button>
@@ -237,16 +238,58 @@
         clearConfirmation();
       }
     });
-    document.getElementById("project-settings").addEventListener("click", () => {
-      document.getElementById("fixture-backdrop").style.display = "block";
+    const closeFixtureOverlayDialog = () => {
+      document.getElementById("project-dialog")?.remove();
+      document.getElementById("fixture-backdrop").style.display = "none";
+    };
+    const openFixtureOverlayDialog = (withBackdrop) => {
+      document.getElementById("fixture-backdrop").style.display =
+        withBackdrop ? "block" : "none";
       setTimeout(() => {
         const dialog = document.createElement("section");
         dialog.id = "project-dialog";
         dialog.setAttribute("role", "dialog");
         dialog.setAttribute("aria-modal", "true");
-        dialog.innerHTML = '<textarea></textarea><button aria-label="Close">x</button>';
+        dialog.innerHTML = '<textarea></textarea><button id="project-dialog-close" aria-label="Close">x</button>';
         document.body.appendChild(dialog);
       }, 50);
+    };
+    document.getElementById("project-settings").addEventListener("click", () => {
+      openFixtureOverlayDialog(false);
+    });
+    document.getElementById("search-control").addEventListener("click", () => {
+      openFixtureOverlayDialog(true);
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target.id === "project-dialog-close") {
+        closeFixtureOverlayDialog();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        window.fixtureEscapeKeyDownCount =
+          Number(window.fixtureEscapeKeyDownCount || 0) + 1;
+        closeFixtureOverlayDialog();
+      }
+    });
+    document.addEventListener("keyup", (event) => {
+      if (event.key === "Escape") {
+        window.fixtureEscapeKeyUpCount =
+          Number(window.fixtureEscapeKeyUpCount || 0) + 1;
+      }
+    });
+    document.getElementById("fixture-backdrop").addEventListener("pointerdown", () => {
+      window.fixtureBackdropPointerDownCount =
+        Number(window.fixtureBackdropPointerDownCount || 0) + 1;
+    });
+    document.getElementById("fixture-backdrop").addEventListener("pointerup", () => {
+      window.fixtureBackdropPointerUpCount =
+        Number(window.fixtureBackdropPointerUpCount || 0) + 1;
+    });
+    document.getElementById("fixture-backdrop").addEventListener("click", () => {
+      window.fixtureBackdropClickCount =
+        Number(window.fixtureBackdropClickCount || 0) + 1;
+      closeFixtureOverlayDialog();
     });
   </script>
 </body>
