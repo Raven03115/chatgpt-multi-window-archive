@@ -2,6 +2,19 @@
 
 本文件記錄各版本的重要功能、修正與行為變更。
 
+## v4.5.8 — 2026-07-13
+
+- 修正排程頁在 Electron 中只顯示範本、無法顯示 active tasks 的問題。
+- 僅針對 ChatGPT automations listing GET XHR 移除 Electron User-Agent token，其他頁面與請求維持原始 User-Agent。
+- 修正 compact confirmation dialog 偵測與 Upgrade menu precedence。
+- 修正 Settings 右側 conversation 區域點擊穿透到底層 pane。
+- 修正 Settings 透明 root 沒有官方 backdrop 時，右側點擊無法關閉設定。
+- 修正 Upgrade 關閉 timer 覆蓋後續 Settings shape 的競態。
+- 修正 Upgrade 關閉手勢因 DOM 移除而重新命中底層 Upgrade menu item，造成畫面閃回。
+- 完整自動測試增加至 68 項，Electron fixture 通過。
+- 保持一般對話、Project、Search、刪除確認框、pane 與既有功能。
+- 4 格或 6 格切換對話的短暫背景閃爍仍為已知限制，本版未處理。
+
 ## v4.5.7 — 2026-07-12
 
 - 修正點擊一般對話與 Project 對話的三點操作按鈕時，可能誤切換或開啟對話的問題。

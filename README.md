@@ -1,4 +1,4 @@
-# ChatGPT Multi Pane v4.5.7
+# ChatGPT Multi Pane v4.5.8
 
 非官方的 Windows 多窗格 ChatGPT 工作區。
 
@@ -24,6 +24,10 @@
 - 選單、彈出視窗與設定面板會保持在對話窗格上方
 - Settings 與 Project 設定面板會同步動態尺寸，避免內容增減後被裁切
 - 防止設定面板只顯示灰色背景，或原始 workspace 與設定面板重疊
+- 排程頁可在 Electron 中顯示既有 active tasks，且只對必要的 automations listing request 調整 User-Agent
+- Settings 會攔截右側對話區域的背景點擊並正常關閉，不會讓點擊穿透到底層窗格
+- 修正 Upgrade 關閉與後續 Settings shape 的競態，以及關閉手勢造成的畫面閃回
+- 修正 compact confirmation dialog 顯示與 Upgrade menu 判斷優先序
 - 提供 overlay policy 單元測試與不連線 ChatGPT 的離線 Electron fixture
 - 支援官方搜尋對話與設定視窗
 - 支援資料庫、排程、圖像、GPT、網站等官方頁面
@@ -237,6 +241,6 @@ npm start
 
 ## 版本
 
-目前公開穩定版：`v4.5.7`
+目前公開穩定版：`v4.5.8`
 
 完整版本歷史請見 [`CHANGELOG.md`](CHANGELOG.md)。
