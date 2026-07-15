@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-multi-window",
-  "version": "4.5.8",
+  "version": "4.5.9",
   "private": true,
   "description": "Unofficial Windows multi-pane workspace for the official ChatGPT website",
   "main": "main.js",

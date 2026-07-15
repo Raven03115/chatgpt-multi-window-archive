@@ -1,4 +1,4 @@
-# ChatGPT Multi Pane v4.5.8
+# ChatGPT Multi Pane v4.5.9
 
 非官方的 Windows 多窗格 ChatGPT 工作區。
 
@@ -28,7 +28,8 @@
 - Settings 會攔截右側對話區域的背景點擊並正常關閉，不會讓點擊穿透到底層窗格
 - 修正 Upgrade 關閉與後續 Settings shape 的競態，以及關閉手勢造成的畫面閃回
 - 修正 compact confirmation dialog 顯示與 Upgrade menu 判斷優先序
-- 提供 overlay policy 單元測試與不連線 ChatGPT 的離線 Electron fixture
+- 修正 Settings 記憶管理輸入與巢狀 dialog 的關閉層級，避免誤關整個 Settings 或殘留遮罩
+- 提供 overlay policy 單元測試與不連線 ChatGPT 的離線 Electron fixture（完整自動測試 74 項）
 - 支援官方搜尋對話與設定視窗
 - 支援資料庫、排程、圖像、GPT、網站等官方頁面
 - 支援升級方案等全畫面頁面
@@ -241,6 +242,6 @@ npm start
 
 ## 版本
 
-目前公開穩定版：`v4.5.8`
+目前公開穩定版：`v4.5.9`
 
 完整版本歷史請見 [`CHANGELOG.md`](CHANGELOG.md)。
