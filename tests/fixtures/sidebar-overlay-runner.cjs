@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("node:path");
+const os = require("node:os");
 const {
   app,
   BrowserWindow,
@@ -15,6 +16,12 @@ const {
 const {
   configureAutomationsRequestUserAgent
 } = require("../../lib/browser-user-agent.cjs");
+
+const fixtureUserDataPath = path.join(
+  os.tmpdir(),
+  `chatgpt-multi-window-sidebar-overlay-${process.pid}`
+);
+app.setPath("userData", fixtureUserDataPath);
 
 const events = [];
 const eventWaiters = new Set();
@@ -35,6 +42,7 @@ let appliedFixtureShape = [];
 let fixtureOverlayOnlyKind = null;
 let fixtureSettingsEscapeGeneration = null;
 let fixtureInjectedEscapeCloseIntentGeneration = null;
+let fixtureNativeDialogClosePending = false;
 let fixtureSettingsOutsideClickCount = 0;
 let fixtureShapeStayedFullThroughEscapeDispatch = false;
 
@@ -476,19 +484,21 @@ async function runUpgradeSettingsRace(delayMs) {
   await resetFixturePointerCounts();
   const backdropResult =
     await dispatchWorkspacePointerSequence(1100, 700);
+  const settingsState =
+    await getFixtureSettingsGestureState();
   assert(
     backdropResult.overlayShapeHit === true &&
       ["html", "document-body", "transparent-root"].includes(
         backdropResult.targetKind
       ) &&
-      backdropResult.settingsOutsideClickCount === 1 &&
-      backdropResult.shapeStayedFullThroughEscapeDispatch === true &&
-      backdropResult.escapeKeyDownCount === 1 &&
-      backdropResult.escapeKeyUpCount === 1 &&
+      backdropResult.settingsOutsideClickCount === 0 &&
+      backdropResult.escapeKeyDownCount === 0 &&
+      backdropResult.escapeKeyUpCount === 0 &&
       backdropResult.backdropClickCount === 0 &&
       backdropResult.panePointerDownCount === 0 &&
       backdropResult.panePointerUpCount === 0 &&
-      backdropResult.paneClickCount === 0,
+      backdropResult.paneClickCount === 0 &&
+      settingsState.dialogExists,
     `Upgrade to Settings shape race at delay=${delayMs}ms: ` +
       `overlayShapeHit=${backdropResult.overlayShapeHit} ` +
       `targetKind=${backdropResult.targetKind} ` +
@@ -498,6 +508,7 @@ async function runUpgradeSettingsRace(delayMs) {
       `backdropClicks=${backdropResult.backdropClickCount} ` +
       `paneClicks=${backdropResult.paneClickCount}`
   );
+  await dispatchPointerAndClick("#project-dialog-close");
   await waitForEvent((entry) =>
     events.indexOf(entry) >= settingsStart &&
     entry.channel === "chatgpt-sidebar-shape-state" &&
@@ -791,16 +802,25 @@ async function run() {
 
         const shouldCloseFullscreen =
           overlayState.mode === "fullscreen";
-        overlayState = transitionOverlayState(overlayState, {
-          type: "close"
-        });
-        fixtureDialogRect = null;
-        fixturePopupRects = [];
-        applyFixtureOverlayShape();
 
         if (shouldCloseFullscreen) {
+          overlayState = transitionOverlayState(overlayState, {
+            type: "close"
+          });
+          fixtureDialogRect = null;
+          fixturePopupRects = [];
+          applyFixtureOverlayShape();
           scheduleFixtureFullscreenClose();
+        } else {
+          fixtureNativeDialogClosePending = true;
         }
+        events.push({
+          channel: "fixture-dialog-close-handling",
+          payload: {
+            mode: overlayState.mode,
+            pending: fixtureNativeDialogClosePending
+          }
+        });
       }
 
       if (channel === "chatgpt-sidebar-fullscreen-overlay-intent") {
@@ -849,6 +869,7 @@ async function run() {
         channel === "chatgpt-sidebar-shape-state" &&
         fixtureDialogVisible
       ) {
+        fixtureNativeDialogClosePending = false;
         overlayState = transitionOverlayState(overlayState, {
           type: "close"
         });
@@ -1171,22 +1192,23 @@ async function run() {
   await resetFixturePointerCounts();
   const rightBackdropResult =
     await dispatchWorkspacePointerSequence(1100, 700);
+  settingsGuardState = await getFixtureSettingsGestureState();
   assert(
     rightBackdropResult.overlayShapeHit === true &&
       ["html", "document-body", "transparent-root"].includes(
         rightBackdropResult.targetKind
       ) &&
-      rightBackdropResult.settingsOutsideClickCount === 1 &&
-      rightBackdropResult.shapeStayedFullThroughEscapeDispatch === true &&
-      rightBackdropResult.escapeKeyDownCount === 1 &&
-      rightBackdropResult.escapeKeyUpCount === 1 &&
+      rightBackdropResult.settingsOutsideClickCount === 0 &&
+      rightBackdropResult.escapeKeyDownCount === 0 &&
+      rightBackdropResult.escapeKeyUpCount === 0 &&
       rightBackdropResult.backdropPointerDownCount === 0 &&
       rightBackdropResult.backdropPointerUpCount === 0 &&
       rightBackdropResult.backdropClickCount === 0 &&
       rightBackdropResult.panePointerDownCount === 0 &&
       rightBackdropResult.panePointerUpCount === 0 &&
-      rightBackdropResult.paneClickCount === 0,
-    "right-side Settings backdrop click-through: " +
+      rightBackdropResult.paneClickCount === 0 &&
+      settingsGuardState.dialogExists,
+    "right-side Settings transparent root unexpectedly closed or leaked input: " +
       `overlayShapeHit=${rightBackdropResult.overlayShapeHit} ` +
       `targetKind=${rightBackdropResult.targetKind} ` +
       `outsideIpc=${rightBackdropResult.settingsOutsideClickCount} ` +
@@ -1199,6 +1221,7 @@ async function run() {
       `panePointerUp=${rightBackdropResult.panePointerUpCount} ` +
       `paneClicks=${rightBackdropResult.paneClickCount}`
   );
+  await dispatchPointerAndClick("#project-dialog-close");
   await waitForEvent((entry) =>
     events.indexOf(entry) >= rightBackdropStart &&
     entry.channel === "chatgpt-sidebar-shape-state" &&
@@ -1210,7 +1233,7 @@ async function run() {
       shapeContainsPoint(appliedFixtureShape, 100, 700) &&
       !shapeContainsPoint(appliedFixtureShape, 1100, 700) &&
       overlayWindow.isVisible(),
-    "Settings backdrop close did not restore sidebar-only shape"
+    "Settings close did not restore sidebar-only shape"
   );
 
   const settingsCloseStart = events.length;
@@ -1257,6 +1280,139 @@ async function run() {
       !shapeContainsPoint(appliedFixtureShape, 1100, 700) &&
       overlayWindow.isVisible(),
     "Settings Escape did not restore sidebar-only shape"
+  );
+
+  const nestedCloseStart = events.length;
+  await dispatchPointerAndClick("#project-settings");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedCloseStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 300
+  );
+  await dispatchPointerAndClick("#open-memory-dialog");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedCloseStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 150 &&
+    entry.payload?.dialogRect?.height < 200
+  );
+  const nestedChildCloseEventStart = events.length;
+  await dispatchPointerAndClick("#memory-dialog-close");
+  const nestedCloseHandling = await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedChildCloseEventStart &&
+    entry.channel === "fixture-dialog-close-handling"
+  );
+  const restoredParent = await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedChildCloseEventStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 300
+  );
+  assert(
+    restoredParent &&
+      overlayState.mode === "shaped-dialog" &&
+      nestedCloseHandling.payload?.mode === "shaped-dialog" &&
+      nestedCloseHandling.payload?.pending === true,
+    "nested dialog close prematurely unlocked the parent Settings overlay"
+  );
+  const nestedXState =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        parentExists: Boolean(document.getElementById("project-dialog")),
+        childExists: Boolean(document.getElementById("memory-dialog")),
+        closeClickCount: Number(window.fixtureMemoryCloseClickCount || 0),
+        closeClickDefaultPrevented: Boolean(window.fixtureMemoryCloseClickDefaultPrevented)
+      })
+    `);
+  assert(
+    nestedXState.parentExists &&
+      !nestedXState.childExists &&
+      nestedXState.closeClickCount === 1 &&
+      nestedXState.closeClickDefaultPrevented === false,
+    "nested dialog X did not remain a native unprevented click"
+  );
+
+  await dispatchPointerAndClick("#open-memory-dialog");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedChildCloseEventStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 150 &&
+    entry.payload?.dialogRect?.height < 200
+  );
+  const nestedEscapeStart = events.length;
+  const nestedEscapeDispatch =
+    await overlayWindow.webContents.executeJavaScript(`
+      (() => {
+        const event = new KeyboardEvent("keydown", {
+          key: "Escape",
+          code: "Escape",
+          bubbles: true,
+          cancelable: true
+        });
+        const dispatchResult = document.dispatchEvent(event);
+        return {
+          dispatchResult,
+          defaultPrevented: event.defaultPrevented
+        };
+      })()
+    `);
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedEscapeStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 300
+  );
+  const nestedEscapeState =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        parentExists: Boolean(document.getElementById("project-dialog")),
+        childExists: Boolean(document.getElementById("memory-dialog")),
+        escapeDefaultPrevented: Boolean(window.fixtureEscapeDefaultPrevented)
+      })
+    `);
+  assert(
+    nestedEscapeDispatch.dispatchResult === true &&
+      nestedEscapeDispatch.defaultPrevented === false &&
+      nestedEscapeState.escapeDefaultPrevented === false &&
+      nestedEscapeState.parentExists &&
+      !nestedEscapeState.childExists &&
+      overlayState.mode === "shaped-dialog",
+    "nested dialog Escape did not preserve the parent or native event"
+  );
+
+  await dispatchPointerAndClick("#open-memory-dialog");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedEscapeStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 150 &&
+    entry.payload?.dialogRect?.height < 200
+  );
+  const nestedBackdropStart = events.length;
+  await dispatchPointerAndClick("#memory-backdrop");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedBackdropStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.dialogRect?.height >= 300
+  );
+  const nestedBackdropState =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        parentExists: Boolean(document.getElementById("project-dialog")),
+        childExists: Boolean(document.getElementById("memory-dialog"))
+      })
+    `);
+  assert(
+    nestedBackdropState.parentExists &&
+      !nestedBackdropState.childExists &&
+      overlayState.mode === "shaped-dialog" &&
+      !events.slice(nestedBackdropStart).some((entry) =>
+        entry.channel === "chatgpt-sidebar-dialog-close-intent"
+      ),
+    "nested dialog backdrop did not preserve the parent Settings overlay"
+  );
+  await dispatchPointerAndClick("#project-dialog-close");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= nestedChildCloseEventStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    !entry.payload?.dialogRect
   );
 
   const searchBackdropStart = events.length;

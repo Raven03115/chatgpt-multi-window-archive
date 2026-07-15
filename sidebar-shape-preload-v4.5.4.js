@@ -1023,6 +1023,12 @@ function isCloseControl(target) {
 }
 
 function notifyCloseIntent() {
+  /*
+   * The native handler runs after this capture listener. Force the next
+   * observer/frame report even when a parent dialog has identical bounds,
+   * so the main process can resolve the remaining dialog stack from DOM.
+   */
+  lastSignature = "";
   ipcRenderer.send(
     "chatgpt-sidebar-dialog-close-intent"
   );
@@ -1901,18 +1907,6 @@ function startDetection() {
   );
 
   document.addEventListener(
-    "pointerdown",
-    handleSettingsOutsidePointerDown,
-    true
-  );
-
-  document.addEventListener(
-    "pointerup",
-    handleSettingsOutsidePointerUp,
-    true
-  );
-
-  document.addEventListener(
     "pointerup",
     handlePointerUp,
     true
@@ -1921,12 +1915,6 @@ function startDetection() {
   document.addEventListener(
     "pointercancel",
     handlePointerCancel,
-    true
-  );
-
-  document.addEventListener(
-    "click",
-    handleSettingsOutsideClick,
     true
   );
 

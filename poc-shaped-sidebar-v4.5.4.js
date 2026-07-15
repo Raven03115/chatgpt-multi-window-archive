@@ -204,6 +204,7 @@ let fullscreenCloseTimer = null;
 let overlayOnlyIntentKind = null;
 let settingsOutsideEscapeGeneration = null;
 let settingsInjectedEscapeCloseIntentGeneration = null;
+let nativeDialogClosePending = false;
 let sidebarRouteForwardSuppressionUntil = 0;
 let panesSuppressedForOverlay = false;
 let lastAppliedOverlayShapeSignature = "";
@@ -2030,6 +2031,7 @@ function applyOverlayRuntimeEvent(event, reason) {
 }
 
 function beginOverlayIntentPending() {
+  nativeDialogClosePending = false;
   clearProjectActionIntent("overlay-intent-pending");
   clearOverlayPendingTimer();
   applyOverlayRuntimeEvent(
@@ -2080,6 +2082,7 @@ function beginOverlayIntentPending() {
 
 function setOverlayOnlyUiActive(active, kind = null) {
   if (active) {
+    nativeDialogClosePending = false;
     if (kind === "settings" || kind === "search") {
       const isNewExplicitIntent =
         overlayOnlyIntentKind !== kind ||
@@ -2129,6 +2132,7 @@ function setOverlayOnlyUiActive(active, kind = null) {
   }
 
   clearOverlayPendingTimer();
+  nativeDialogClosePending = false;
   applyOverlayRuntimeEvent(
     { type: "close" },
     "overlay-closed"
@@ -2182,6 +2186,7 @@ function scheduleFullscreenOverlayClose() {
 }
 
 function setFullscreenOverlayMode(enabled) {
+  nativeDialogClosePending = false;
   if (enabled) {
     clearFullscreenCloseTimer();
   }
@@ -2254,6 +2259,7 @@ function dismissSidebarTransientUi() {
    */
   popupRects = [];
   lockedDialogRect = null;
+  nativeDialogClosePending = false;
   clearOverlayPendingTimer();
   applyOverlayRuntimeEvent(
     { type: "close" },
@@ -3186,6 +3192,7 @@ function setManualExpanded(expanded) {
 }
 
 function unlockDialogShape(suppressSidebarRoute = false) {
+  nativeDialogClosePending = false;
   lockedDialogRect = null;
   clearOverlayPendingTimer();
   applyOverlayRuntimeEvent(
@@ -3817,14 +3824,21 @@ ipcMain.on(
       );
     } else if (
       !nextDialogRect &&
-      lockedDialogRect &&
+      (
+        nativeDialogClosePending ||
+        lockedDialogRect
+      ) &&
       !fullscreenOverlayMode
     ) {
-      lockedDialogRect = null;
-      applyOverlayRuntimeEvent(
-        { type: "close" },
-        "dialog-surface-removed"
-      );
+      if (nativeDialogClosePending) {
+        unlockDialogShape(true);
+      } else {
+        lockedDialogRect = null;
+        applyOverlayRuntimeEvent(
+          { type: "close" },
+          "dialog-surface-removed"
+        );
+      }
     }
 
     if (!manualExpanded) {
@@ -3982,18 +3996,27 @@ ipcMain.on(
       return;
     }
 
+    const shouldCloseFullscreen = fullscreenOverlayMode;
+
+    if (shouldCloseFullscreen) {
+      recordIntegrationEvent({
+        event: "sidebar-dialog-close-intent",
+        source: "dialog-close-intent",
+        action: "close-overlay-dialog",
+        reason: "confirmed-fullscreen-overlay"
+      });
+      unlockDialogShape(true);
+      scheduleFullscreenOverlayClose();
+      return;
+    }
+
+    nativeDialogClosePending = true;
     recordIntegrationEvent({
       event: "sidebar-dialog-close-intent",
       source: "dialog-close-intent",
-      action: "close-overlay-dialog",
-      reason: "confirmed-overlay-dialog"
+      action: "wait-for-native-dialog-update",
+      reason: "native-close-must-resolve-dialog-stack"
     });
-    const shouldCloseFullscreen = fullscreenOverlayMode;
-    unlockDialogShape(true);
-
-    if (shouldCloseFullscreen) {
-      scheduleFullscreenOverlayClose();
-    }
   }
 );
 
