@@ -35,3 +35,34 @@ test("offline Electron fixture preserves overlay interaction and dynamic shape i
     /SIDEBAR OVERLAY FIXTURE: PASS/
   );
 });
+
+test("offline Electron fixture validates active pane context toast behavior", () => {
+  const electronPath = require("electron");
+  const result = spawnSync(
+    electronPath,
+    [path.join(
+      __dirname,
+      "fixtures",
+      "active-pane-toast-runner.cjs"
+    )],
+    {
+      cwd: path.join(__dirname, ".."),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ELECTRON_DISABLE_SECURITY_WARNINGS: "true"
+      },
+      timeout: 20000
+    }
+  );
+
+  assert.equal(
+    result.status,
+    0,
+    `${result.stdout}\n${result.stderr}`
+  );
+  assert.match(
+    result.stdout,
+    /ACTIVE PANE TOAST FIXTURE: PASS/
+  );
+});

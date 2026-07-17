@@ -10,7 +10,7 @@
 - `npm run diagnostics -- --last 250`：調整顯示筆數，最大 5000 筆。
 - `npm run diagnostics -- --errors-only`：只顯示失敗或錯誤事件。
 
-目前完整測試合計 74 個。測試包含離線 Electron fixture，會驗證 production sidebar preload 與 overlay policy，但不連線 `chatgpt.com`，也不使用使用者的登入 Session、Cookie、對話或 Project 資料。`npm run verify` 會執行完整 Repository 檢查與全部 74 個自動測試。
+目前完整測試合計 110 個。測試包含離線 Electron fixtures，會驗證 production sidebar preload、overlay policy 與活動窗格上方中央提示，但不連線 `chatgpt.com`，也不使用使用者的登入 Session、Cookie、對話或 Project 資料。`npm run verify` 會執行完整 Repository 檢查與全部 110 個自動測試。
 
 ## 日誌位置與輪替
 

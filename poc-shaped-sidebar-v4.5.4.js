@@ -25,6 +25,12 @@ const {
   configureAutomationsRequestUserAgent
 } = require("./lib/browser-user-agent.cjs");
 const {
+  createPaneDisplayContext,
+  getActivePaneContextToastScript,
+  getRemoveActivePaneContextToastScript,
+  shouldShowPaneContextToast
+} = require("./lib/active-pane-context.cjs");
+const {
   buildOverlayShape,
   classifyOverlayControl,
   decideOverlayControl,
@@ -170,6 +176,10 @@ const pendingPaneUrls = [];
 let activePaneIndex = 0;
 let activeVisualUpdateQueue = Promise.resolve();
 let renderedActivePaneIndex = null;
+let paneContextToastUpdateQueue = Promise.resolve();
+let paneContextToastGeneration = 0;
+let paneContextToastUserInteractionObserved = false;
+let lastPaneContextToastContext = null;
 let lastRefreshRequestAt = 0;
 let lastClosePaneRequestAt = 0;
 const refreshInputHandlerTargets = new WeakSet();
@@ -1121,6 +1131,213 @@ async function setPaneActiveVisual(
   }
 }
 
+function isPaneContextToastSuppressed() {
+  return Boolean(
+    panesSuppressedForOverlay ||
+    overlayOnlyUiActive ||
+    fullscreenOverlayMode ||
+    lockedDialogRect ||
+    overlayRuntimeState.mode === "overlay-intent-pending"
+  );
+}
+
+function getPaneDisplayContext(index, options = {}) {
+  const view = paneViews[index];
+
+  if (!isUsableView(view)) {
+    return null;
+  }
+
+  let url = "";
+  let title = "";
+
+  try {
+    url = Object.prototype.hasOwnProperty.call(options, "url")
+      ? String(options.url || "")
+      : view.webContents.getURL();
+    title = Object.prototype.hasOwnProperty.call(options, "title")
+      ? String(options.title || "")
+      : view.webContents.getTitle();
+  } catch {
+    return null;
+  }
+
+  return createPaneDisplayContext({
+    paneIndex: index,
+    paneCount: appConfig.paneCount,
+    url,
+    title
+  });
+}
+
+async function executePaneContextToastScript(view, script) {
+  if (!isUsableView(view)) {
+    return false;
+  }
+
+  try {
+    await view.webContents.executeJavaScript(script, true);
+    return true;
+  } catch {
+    // Navigation or destruction may remove the renderer during injection.
+    return false;
+  }
+}
+
+function removePaneContextToast(view) {
+  return executePaneContextToastScript(
+    view,
+    getRemoveActivePaneContextToastScript()
+  );
+}
+
+function clearAllPaneContextToasts() {
+  const generation = ++paneContextToastGeneration;
+  const views = paneViews.filter(isUsableView);
+
+  paneContextToastUpdateQueue =
+    paneContextToastUpdateQueue
+      .catch(() => {
+        // Keep later toast cleanup running after a transient failure.
+      })
+      .then(async () => {
+        if (generation !== paneContextToastGeneration) {
+          return false;
+        }
+
+        await Promise.all(
+          views.map((view) => removePaneContextToast(view))
+        );
+
+        return true;
+      });
+
+  return paneContextToastUpdateQueue;
+}
+
+function requestActivePaneContextToast(options = {}) {
+  if (options.userInitiated === true) {
+    paneContextToastUserInteractionObserved = true;
+  }
+
+  const generation = ++paneContextToastGeneration;
+  const targetIndex = activePaneIndex;
+  const targetView = paneViews[targetIndex];
+
+  paneContextToastUpdateQueue =
+    paneContextToastUpdateQueue
+      .catch(() => {
+        // Keep later toast updates running after a transient failure.
+      })
+      .then(async () => {
+        if (
+          generation !== paneContextToastGeneration ||
+          paneViews[targetIndex] !== targetView
+        ) {
+          return false;
+        }
+
+        const context = getPaneDisplayContext(
+          targetIndex,
+          options
+        );
+        const suppressed = isPaneContextToastSuppressed();
+        const viewUsable = isUsableView(targetView);
+        const fallbackTitles = new Set([
+          "新對話",
+          "目前對話",
+          "目前頁面"
+        ]);
+
+        if (
+          options.titleUpdateOnly === true &&
+          (
+            !lastPaneContextToastContext ||
+            (
+              lastPaneContextToastContext.routeIdentity ===
+                context?.routeIdentity &&
+              !fallbackTitles.has(
+                lastPaneContextToastContext.displayTitle
+              )
+            )
+          )
+        ) {
+          return false;
+        }
+
+        if (
+          !context ||
+          !shouldShowPaneContextToast({
+            signature: context.signature,
+            lastSignature: options.force === true
+              ? ""
+              : lastPaneContextToastContext?.signature || "",
+            userInitiated:
+              paneContextToastUserInteractionObserved,
+            suppressed,
+            viewUsable
+          })
+        ) {
+          if (suppressed) {
+            await Promise.all(
+              paneViews
+                .filter(isUsableView)
+                .map((view) => removePaneContextToast(view))
+            );
+          }
+
+          return false;
+        }
+
+        await Promise.all(
+          paneViews
+            .filter(isUsableView)
+            .map((view) => removePaneContextToast(view))
+        );
+
+        if (
+          generation !== paneContextToastGeneration ||
+          paneViews[targetIndex] !== targetView ||
+          !isUsableView(targetView) ||
+          isPaneContextToastSuppressed()
+        ) {
+          return false;
+        }
+
+        const displayed =
+          await executePaneContextToastScript(
+            targetView,
+            getActivePaneContextToastScript(context)
+          );
+
+        if (
+          displayed &&
+          generation === paneContextToastGeneration &&
+          paneViews[targetIndex] === targetView
+        ) {
+          lastPaneContextToastContext = context;
+        }
+
+        return displayed;
+      });
+
+  return paneContextToastUpdateQueue;
+}
+
+function syncPaneContextToastAfterNavigation(
+  index,
+  options = {}
+) {
+  if (
+    index !== activePaneIndex ||
+    !paneContextToastUserInteractionObserved
+  ) {
+    return;
+  }
+
+  requestActivePaneContextToast(options);
+}
+
 function refreshActivePaneVisuals() {
   const targetIndex = activePaneIndex;
 
@@ -1192,6 +1409,11 @@ function setActivePane(index) {
       source: "pane-selection",
       action: "selected",
       reason: "active-pane-request"
+    });
+
+    requestActivePaneContextToast({
+      userInitiated: true,
+      force: true
     });
   }
 
@@ -1441,6 +1663,10 @@ function moveActivePanePosition(direction) {
   saveConfigNow();
   layoutPaneViews();
   refreshActivePaneVisuals();
+  requestActivePaneContextToast({
+    userInitiated: true,
+    force: true
+  });
 
   console.log(
     "[Integration v4.5.9] active pane moved:",
@@ -1718,6 +1944,8 @@ function loadUrlInActivePane(url) {
     refreshActivePaneVisuals();
     return;
   }
+
+  paneContextToastUserInteractionObserved = true;
 
   const loadStartedAt = performance.now();
   const routeKind = getDiagnosticRouteKind(url);
@@ -2007,6 +2235,10 @@ function applyOverlayRuntimeEvent(event, reason) {
     overlayRuntimeState.mode === "shaped-dialog";
   fullscreenOverlayMode =
     overlayRuntimeState.mode === "fullscreen";
+
+  if (isPaneContextToastSuppressed()) {
+    clearAllPaneContextToasts();
+  }
 
   if (previousMode !== overlayRuntimeState.mode) {
     recordIntegrationEvent({
@@ -2353,7 +2585,27 @@ function attachPaneEvents(view) {
 
     installPaneUi(view);
     syncPaneVisualAfterNavigation(index);
+    syncPaneContextToastAfterNavigation(index);
   });
+
+  view.webContents.on(
+    "page-title-updated",
+    (_event, title) => {
+      const index = resolveIndex();
+
+      if (index < 0) {
+        return;
+      }
+
+      syncPaneContextToastAfterNavigation(
+        index,
+        {
+          title,
+          titleUpdateOnly: true
+        }
+      );
+    }
+  );
 
   view.webContents.on(
     "did-navigate",
@@ -2368,6 +2620,13 @@ function attachPaneEvents(view) {
       updatePaneUrl(index, url);
       installPaneUi(view);
       syncPaneVisualAfterNavigation(index);
+      syncPaneContextToastAfterNavigation(
+        index,
+        {
+          url,
+          title: ""
+        }
+      );
     }
   );
 
@@ -2387,6 +2646,13 @@ function attachPaneEvents(view) {
       updatePaneUrl(index, url);
       installPaneUi(view);
       syncPaneVisualAfterNavigation(index);
+      syncPaneContextToastAfterNavigation(
+        index,
+        {
+          url,
+          title: ""
+        }
+      );
     }
   );
 
@@ -2640,6 +2906,9 @@ function setPaneCount(targetCount) {
 
   const currentCount =
     paneViews.length;
+  const previousActivePaneIndex = activePaneIndex;
+  const previousActivePaneView =
+    paneViews[activePaneIndex];
 
   if (
     nextCount ===
@@ -2710,6 +2979,16 @@ function setPaneCount(targetCount) {
     saveConfigNow();
     layoutPaneViews();
     refreshActivePaneVisuals();
+
+    if (
+      activePaneIndex !== previousActivePaneIndex ||
+      paneViews[activePaneIndex] !== previousActivePaneView
+    ) {
+      requestActivePaneContextToast({
+        userInitiated: true,
+        force: true
+      });
+    }
 
     console.log(
       `[Integration v4.5.9] pane count=${nextCount}`
@@ -2859,6 +3138,10 @@ function closeActivePane(
     saveConfigNow();
     layoutPaneViews();
     refreshActivePaneVisuals();
+    requestActivePaneContextToast({
+      userInitiated: true,
+      force: true
+    });
 
     console.log(
       "[Integration v4.5.9] active pane closed:",
@@ -2880,6 +3163,7 @@ function closeActivePane(
 }
 
 function destroyPaneViews() {
+  paneContextToastGeneration += 1;
   clearProjectActionIntent("pane-views-destroyed");
   saveOpenPaneUrls();
 
@@ -4248,6 +4532,8 @@ app.whenReady().then(() => {
 });
 
 app.on("will-quit", () => {
+  paneContextToastGeneration += 1;
+  paneContextToastUserInteractionObserved = false;
   clearPaneCloseNotice();
   clearProjectActionIntent("app-will-quit");
   clearOverlayPendingTimer();
