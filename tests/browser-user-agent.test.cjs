@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
 const {
   applyAutomationsRequestUserAgent,
   configureAutomationsRequestUserAgent,
+  isSupportedAutomationsRequest,
   normalizeAutomationsRequestUserAgent
 } = require("../lib/browser-user-agent.cjs");
 
@@ -68,13 +69,20 @@ test("Settings and Upgrade document or XHR requests retain the Electron UA", () 
   }
 });
 
-test("only automations listing removes the Electron product marker", () => {
-  for (const url of [
-    "https://chatgpt.com/backend-api/automations",
-    "https://chatgpt.com/backend-api/automations/",
-    "https://chatgpt.com/backend-api/automations?limit=20"
+test("only observed automations GET collection and POST item requests remove Electron", () => {
+  for (const details of [
+    requestDetails("https://chatgpt.com/backend-api/automations"),
+    requestDetails("https://chatgpt.com/backend-api/automations/"),
+    requestDetails("https://chatgpt.com/backend-api/automations?limit=20"),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automations/fixture-item-id",
+      { method: "POST" }
+    ),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automations/fixture-item-id?source=scheduled",
+      { method: "POST" }
+    )
   ]) {
-    const details = requestDetails(url);
     const decision = applyAutomationsRequestUserAgent(details);
 
     assert.equal(decision.matchedAutomationsRequest, true);
@@ -91,11 +99,25 @@ test("other backend requests and non-page requests retain the original UA", () =
   for (const details of [
     requestDetails("https://chatgpt.com/backend-api/conversations"),
     requestDetails("https://chatgpt.com/backend-api/automations/jobs"),
+    requestDetails("https://chatgpt.com/backend-api/automations-malicious"),
     requestDetails("https://example.com/backend-api/automations"),
+    requestDetails("https://chatgpt.com.evil.test/backend-api/automations"),
     requestDetails("https://chatgpt.com:444/backend-api/automations"),
     requestDetails("https://chatgpt.com/backend-api/automations", {
       method: "POST"
     }),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automations/fixture-item-id/action",
+      { method: "POST" }
+    ),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automations/fixture-item-id",
+      { method: "PATCH" }
+    ),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automations/fixture-item-id",
+      { method: "DELETE" }
+    ),
     requestDetails("https://chatgpt.com/backend-api/automations", {
       resourceType: "mainFrame"
     }),
@@ -110,9 +132,28 @@ test("other backend requests and non-page requests retain the original UA", () =
   }
 });
 
+test("supported automations matcher is limited to the observed method and route pairs", () => {
+  assert.equal(isSupportedAutomationsRequest(
+    requestDetails("https://chatgpt.com/backend-api/automations")
+  ), true);
+  assert.equal(isSupportedAutomationsRequest(requestDetails(
+    "https://chatgpt.com/backend-api/automations/fixture-item-id",
+    { method: "POST" }
+  )), true);
+  assert.equal(isSupportedAutomationsRequest(requestDetails(
+    "https://chatgpt.com/backend-api/automations/fixture-item-id",
+    { method: "GET" }
+  )), false);
+  assert.equal(isSupportedAutomationsRequest(requestDetails(
+    "https://chatgpt.com/backend-api/automations/fixture-item-id/action",
+    { method: "POST" }
+  )), false);
+});
+
 test("automations policy preserves URL method body cookie and all other headers", () => {
   const details = requestDetails(
-    "https://chatgpt.com/backend-api/automations?limit=20"
+    "https://chatgpt.com/backend-api/automations/fixture-item-id?source=scheduled",
+    { method: "POST" }
   );
   const original = {
     url: details.url,
@@ -137,6 +178,43 @@ test("automations policy preserves URL method body cookie and all other headers"
     original.authorization
   );
   assert.equal(decision.requestHeaders["X-Fixture"], original.fixture);
+});
+
+test("automations policy handles mixed-case and missing User-Agent headers safely", () => {
+  const mixedCase = requestDetails(
+    "https://chatgpt.com/backend-api/automations/fixture-item-id",
+    {
+      method: "POST",
+      requestHeaders: {
+        "uSeR-aGeNt": ORIGINAL_USER_AGENT,
+        "X-Fixture": "unchanged"
+      }
+    }
+  );
+  const mixedDecision = applyAutomationsRequestUserAgent(mixedCase);
+
+  assert.equal(mixedDecision.matchedAutomationsRequest, true);
+  assert.doesNotMatch(
+    mixedDecision.requestHeaders["uSeR-aGeNt"],
+    /Electron\/[0-9.]+/i
+  );
+  assert.equal(mixedDecision.requestHeaders["X-Fixture"], "unchanged");
+
+  const withoutUserAgent = requestDetails(
+    "https://chatgpt.com/backend-api/automations/fixture-item-id",
+    {
+      method: "POST",
+      requestHeaders: { "X-Fixture": "unchanged" }
+    }
+  );
+  const missingDecision = applyAutomationsRequestUserAgent(withoutUserAgent);
+
+  assert.equal(missingDecision.matchedAutomationsRequest, true);
+  assert.equal(missingDecision.electronMarkerRemoved, false);
+  assert.strictEqual(
+    missingDecision.requestHeaders,
+    withoutUserAgent.requestHeaders
+  );
 });
 
 test("shared session installs one composable request-header listener", () => {

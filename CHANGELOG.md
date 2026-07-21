@@ -2,6 +2,15 @@
 
 本文件記錄各版本的重要功能、修正與行為變更。
 
+## v4.6.1 — 2026-07-22
+
+- 修正 Electron 應用程式中排程暫停、恢復、文字與時間編輯及刪除操作回傳錯誤的問題。
+- 相容性調整僅擴充至實際觀察到的 automations item POST request，不影響其他 ChatGPT 請求。
+- 保留原有 headers、驗證資訊、Session 與 User-Agent 的其他內容。
+- 新增去識別化且預設停用的 automations request diagnostics。
+- 完整自動測試增加至 118 項，三個離線 Electron fixtures 通過。
+- 真實 ChatGPT UI 已完成排程詳細資訊、暫停、恢復、編輯、儲存及拋棄式測試排程刪除驗收。
+
 ## v4.6.0 — 2026-07-17
 
 - 新增活動窗格頂部中央對話提示。

@@ -66,6 +66,32 @@ function formatEvent(event) {
     `reason=${safe(event.reason)}`
   ];
 
+  for (const [label, key] of [
+    ["stage", "stage"],
+    ["method", "method"],
+    ["resource", "resourceType"],
+    ["webContents", "webContentsKind"]
+  ]) {
+    if (event[key] !== undefined) {
+      values.push(`${label}=${safe(event[key])}`);
+    }
+  }
+
+  if (Number.isFinite(event.statusCode)) {
+    values.push(`status=${event.statusCode}`);
+  }
+
+  for (const [label, key] of [
+    ["networkError", "networkError"],
+    ["uaHadElectron", "originalUserAgentHasElectronToken"],
+    ["electronRemoved", "electronMarkerRemoved"],
+    ["requestMatched", "matchedAutomationsRequest"]
+  ]) {
+    if (typeof event[key] === "boolean") {
+      values.push(`${label}=${event[key]}`);
+    }
+  }
+
   if (event.errorName || event.sanitizedErrorMessage) {
     values.push(
       `error=${safe(event.errorName, "Error")}:` +

@@ -91,6 +91,53 @@ test("logger writes JSONL with allowed fields only", (t) => {
   assert.equal(Object.hasOwn(record, "authorization"), false);
 });
 
+test("automations diagnostics keeps only safe lifecycle fields", (t) => {
+  const directory = createTempDirectory();
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const logPath = path.join(directory, "integration-events.jsonl");
+  const logger = createDiagnosticsLogger({ logPath });
+
+  assert.equal(logger.log({
+    event: "automations-request",
+    stage: "completed",
+    method: "PATCH",
+    resourceType: "xhr",
+    webContentsKind: "sidebar",
+    routeKind: "automations-item",
+    statusCode: 403,
+    webContentsId: 9,
+    networkError: false,
+    originalUserAgentHasElectronToken: true,
+    electronMarkerRemoved: false,
+    matchedAutomationsRequest: false,
+    url: "https://chatgpt.com/backend-api/automations/secret-id?x=secret",
+    requestHeaders: { Cookie: "secret-cookie" },
+    requestBody: "secret-body"
+  }), true);
+
+  const record = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+  assert.equal(record.method, "PATCH");
+  assert.equal(record.resourceType, "xhr");
+  assert.equal(record.webContentsKind, "sidebar");
+  assert.equal(record.routeKind, "automations-item");
+  assert.equal(record.statusCode, 403);
+  assert.equal(record.webContentsId, 9);
+  assert.equal(record.networkError, false);
+  assert.equal(record.originalUserAgentHasElectronToken, true);
+  assert.equal(record.electronMarkerRemoved, false);
+  assert.equal(record.matchedAutomationsRequest, false);
+
+  const serialized = JSON.stringify(record);
+  for (const secret of [
+    "secret-id",
+    "secret-cookie",
+    "secret-body",
+    "https://"
+  ]) {
+    assert.equal(serialized.includes(secret), false, secret);
+  }
+});
+
 test("sanitizer preserves non-sensitive diagnostic reason names", () => {
   assert.equal(
     sanitizeText("workspace-route-without-intent"),
@@ -165,11 +212,20 @@ test("diagnostics command sanitizes displayed fields defensively", (t) => {
     logPath,
     `${JSON.stringify({
       timestamp: "2026-07-12T00:00:00.000Z",
-      event: "unsafe-event",
-      routeKind: "conversation",
+      event: "automations-request",
+      routeKind: "automations-item",
       action: "failed",
       reason:
-        "https://chatgpt.com/c/private-conversation?email=user@example.com"
+        "https://chatgpt.com/c/private-conversation?email=user@example.com",
+      stage: "completed",
+      method: "POST",
+      resourceType: "xhr",
+      webContentsKind: "pane",
+      statusCode: 404,
+      networkError: false,
+      originalUserAgentHasElectronToken: true,
+      electronMarkerRemoved: false,
+      matchedAutomationsRequest: false
     })}\n`,
     "utf8"
   );
@@ -190,4 +246,13 @@ test("diagnostics command sanitizes displayed fields defensively", (t) => {
   assert.equal(result.stdout.includes("private-conversation"), false);
   assert.equal(result.stdout.includes("user@example.com"), false);
   assert.equal(result.stdout.includes("https://"), false);
+  assert.match(result.stdout, /stage=completed/);
+  assert.match(result.stdout, /method=POST/);
+  assert.match(result.stdout, /resource=xhr/);
+  assert.match(result.stdout, /webContents=pane/);
+  assert.match(result.stdout, /status=404/);
+  assert.match(result.stdout, /networkError=false/);
+  assert.match(result.stdout, /uaHadElectron=true/);
+  assert.match(result.stdout, /electronRemoved=false/);
+  assert.match(result.stdout, /requestMatched=false/);
 });
