@@ -25,6 +25,9 @@ const {
   configureAutomationsRequestUserAgent
 } = require("./lib/browser-user-agent.cjs");
 const {
+  attachGoogleAuthUserAgentCompatibility
+} = require("./lib/google-auth-user-agent.cjs");
+const {
   createPaneDisplayContext,
   getActivePaneContextToastScript,
   getRemoveActivePaneContextToastScript,
@@ -280,7 +283,7 @@ function loadConfig() {
     };
   } catch (error) {
     console.error(
-      "[Integration v4.6.1] config load failed:",
+      "[Integration v4.6.2] config load failed:",
       error.message
     );
 
@@ -310,7 +313,7 @@ function saveConfigNow() {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.6.1] config save failed:",
+      "[Integration v4.6.2] config save failed:",
       error.message
     );
   }
@@ -1091,7 +1094,7 @@ async function installPaneUi(view) {
     );
   } catch (error) {
     console.error(
-      "[Integration v4.6.1] pane UI injection failed:",
+      "[Integration v4.6.2] pane UI injection failed:",
       error.message
     );
   }
@@ -1391,7 +1394,7 @@ function refreshActivePaneVisuals() {
 
         if (isUsableWindow(workspaceWindow)) {
           workspaceWindow.setTitle(
-            `ChatGPT Multi Pane v4.6.1 — Active ${targetIndex + 1}/${appConfig.paneCount}`
+            `ChatGPT Multi Pane v4.6.2 — Active ${targetIndex + 1}/${appConfig.paneCount}`
           );
         }
       });
@@ -1439,7 +1442,7 @@ function setActivePane(index) {
   }
 
   console.log(
-    `[Integration v4.6.1] active pane=${activePaneIndex + 1}`
+    `[Integration v4.6.2] active pane=${activePaneIndex + 1}`
   );
 
   refreshActivePaneVisuals();
@@ -1565,7 +1568,7 @@ function showPaneCloseNotice(message) {
     )
     .catch((error) => {
       console.error(
-        "[Integration v4.6.1] pane close notice failed:",
+        "[Integration v4.6.2] pane close notice failed:",
         error.message
       );
     });
@@ -1643,7 +1646,7 @@ function moveActivePanePosition(direction) {
     targetIndex >= paneViews.length
   ) {
     console.log(
-      "[Integration v4.6.1] active pane move no-op:",
+      "[Integration v4.6.2] active pane move no-op:",
       {
         sourceIndex: currentIndex,
         targetIndex,
@@ -1690,7 +1693,7 @@ function moveActivePanePosition(direction) {
   });
 
   console.log(
-    "[Integration v4.6.1] active pane moved:",
+    "[Integration v4.6.2] active pane moved:",
     {
       sourceIndex: currentIndex,
       targetIndex,
@@ -1836,7 +1839,7 @@ function reloadWebContentsFromCurrentUrl(
       )
       .catch((error) => {
         console.error(
-          `[Integration v4.6.1] ${label} reload failed:`,
+          `[Integration v4.6.2] ${label} reload failed:`,
           error.message
         );
       });
@@ -1844,7 +1847,7 @@ function reloadWebContentsFromCurrentUrl(
     return true;
   } catch (error) {
     console.error(
-      `[Integration v4.6.1] ${label} reload failed:`,
+      `[Integration v4.6.2] ${label} reload failed:`,
       error.message
     );
 
@@ -1891,7 +1894,7 @@ function refreshActivePaneAndSidebar(
 
   if (isUsableWindow(workspaceWindow)) {
     workspaceWindow.setTitle(
-      `ChatGPT Multi Pane v4.6.1 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
+      `ChatGPT Multi Pane v4.6.2 — Refreshing Active ${paneIndex + 1}/${appConfig.paneCount}`
     );
   }
 
@@ -1919,7 +1922,7 @@ function refreshActivePaneAndSidebar(
   }
 
   console.log(
-    "[Integration v4.6.1] refresh requested:",
+    "[Integration v4.6.2] refresh requested:",
     {
       source,
       pane: paneIndex + 1,
@@ -1972,7 +1975,7 @@ function loadUrlInActivePane(url) {
   const routeKind = getDiagnosticRouteKind(url);
 
   console.log(
-    `[Integration v4.6.1] load pane=${paneIndex + 1} url=${url}`
+    `[Integration v4.6.2] load pane=${paneIndex + 1} url=${url}`
   );
 
   updatePaneUrl(
@@ -2026,7 +2029,7 @@ function loadUrlInActivePane(url) {
       });
 
       console.error(
-        "[Integration v4.6.1] pane navigation failed:",
+        "[Integration v4.6.2] pane navigation failed:",
         error.message
       );
     })
@@ -2047,7 +2050,7 @@ function completeOverlayWorkspaceSelection(url) {
   }
 
   console.log(
-    "[Integration v4.6.1] completing workspace selection:",
+    "[Integration v4.6.2] completing workspace selection:",
     url
   );
 
@@ -2199,7 +2202,7 @@ function handleSidebarNavigation(url) {
     });
 
     console.log(
-      "[Integration v4.6.1] native sidebar route ignored:",
+      "[Integration v4.6.2] native sidebar route ignored:",
       url
     );
 
@@ -2542,7 +2545,7 @@ function dismissSidebarTransientUi() {
     });
   } catch (error) {
     console.error(
-      "[Integration v4.6.1] dismiss input failed:",
+      "[Integration v4.6.2] dismiss input failed:",
       error.message
     );
   }
@@ -2710,7 +2713,7 @@ function attachPaneEvents(view) {
     } else {
       shell.openExternal(url).catch((error) => {
         console.error(
-          "[Integration v4.6.1] external link failed:",
+          "[Integration v4.6.2] external link failed:",
           error.message
         );
       });
@@ -2741,7 +2744,7 @@ function schedulePaneInitialLoad(
       .loadURL(getPaneStartUrl(index))
       .catch((error) => {
         console.error(
-          "[Integration v4.6.1] initial pane load failed:",
+          "[Integration v4.6.2] initial pane load failed:",
           error.message
         );
       });
@@ -2777,6 +2780,10 @@ function createPaneView(
       webSecurity: true
     }
   });
+
+  attachGoogleAuthUserAgentCompatibility(
+    view.webContents
+  );
 
   attachPaneEvents(view);
 
@@ -2908,7 +2915,7 @@ function preserveActivePaneForReduction(
   renderedActivePaneIndex = null;
 
   console.log(
-    "[Integration v4.6.1] preserved active pane during layout reduction:",
+    "[Integration v4.6.2] preserved active pane during layout reduction:",
     {
       sourceIndex: selectedIndex,
       targetIndex: preservedIndex,
@@ -3012,7 +3019,7 @@ function setPaneCount(targetCount) {
     }
 
     console.log(
-      `[Integration v4.6.1] pane count=${nextCount}`
+      `[Integration v4.6.2] pane count=${nextCount}`
     );
   } finally {
     setTimeout(() => {
@@ -3037,7 +3044,7 @@ function closeActivePane(
     showPaneCloseNotice(blockedMessage);
 
     console.log(
-      "[Integration v4.6.1] close pane blocked:",
+      "[Integration v4.6.2] close pane blocked:",
       {
         source,
         paneCount: currentCount
@@ -3081,7 +3088,7 @@ function closeActivePane(
     appConfig.paneCount !== currentCount
   ) {
     console.error(
-      "[Integration v4.6.1] close pane rejected because pane state is inconsistent:",
+      "[Integration v4.6.2] close pane rejected because pane state is inconsistent:",
       {
         source,
         viewCount: currentCount,
@@ -3165,7 +3172,7 @@ function closeActivePane(
     });
 
     console.log(
-      "[Integration v4.6.1] active pane closed:",
+      "[Integration v4.6.2] active pane closed:",
       {
         source,
         closedPane:
@@ -3305,7 +3312,7 @@ function sanitizeDialogRect(
     areaRatio >= 0.72
   ) {
     console.log(
-      "[Integration v4.6.1] rejected oversized dialog rect:",
+      "[Integration v4.6.2] rejected oversized dialog rect:",
       {
         sanitized,
         widthRatio,
@@ -3370,7 +3377,7 @@ function applyOverlayShape() {
     "function"
   ) {
     console.error(
-      "[Integration v4.6.1] BrowserWindow.setShape unavailable"
+      "[Integration v4.6.2] BrowserWindow.setShape unavailable"
     );
 
     return;
@@ -3485,7 +3492,7 @@ function applyOverlayShape() {
     });
   } catch (error) {
     console.error(
-      "[Integration v4.6.1] setShape failed:",
+      "[Integration v4.6.2] setShape failed:",
       error.message
     );
   }
@@ -3527,7 +3534,7 @@ function unlockDialogShape(suppressSidebarRoute = false) {
   applyOverlayShape();
 
   console.log(
-    "[Integration v4.6.1] dialog shape unlocked"
+    "[Integration v4.6.2] dialog shape unlocked"
   );
 }
 
@@ -3630,6 +3637,10 @@ function createSidebarOverlayWindow() {
     }
   });
 
+  attachGoogleAuthUserAgentCompatibility(
+    sidebarOverlayWindow.webContents
+  );
+
   installRefreshShortcutInputHandler(
     sidebarOverlayWindow.webContents
   );
@@ -3680,7 +3691,7 @@ function createSidebarOverlayWindow() {
           );
       } catch (error) {
         console.error(
-          "[Integration v4.6.1] transparency CSS failed:",
+          "[Integration v4.6.2] transparency CSS failed:",
           error.message
         );
       }
@@ -3695,7 +3706,7 @@ function createSidebarOverlayWindow() {
       sidebarInitialLoadComplete = true;
 
       console.log(
-        "[Integration v4.6.1] ChatGPT sidebar overlay loaded"
+        "[Integration v4.6.2] ChatGPT sidebar overlay loaded"
       );
     }
   );
@@ -3728,13 +3739,13 @@ function createSidebarOverlayWindow() {
         isWorkspaceRouteUrl(url)
       ) {
         console.log(
-          "[Integration v4.6.1] native sidebar window route ignored:",
+          "[Integration v4.6.2] native sidebar window route ignored:",
           url
         );
       } else if (!isChatGPTUrl(url)) {
         shell.openExternal(url).catch((error) => {
           console.error(
-            "[Integration v4.6.1] sidebar external link failed:",
+            "[Integration v4.6.2] sidebar external link failed:",
             error.message
           );
         });
@@ -3761,7 +3772,7 @@ function createSidebarOverlayWindow() {
         sanitizedErrorMessage: details?.exitCode
       });
       console.error(
-        "[Integration v4.6.1] sidebar renderer stopped:",
+        "[Integration v4.6.2] sidebar renderer stopped:",
         details
       );
     }
@@ -3787,7 +3798,7 @@ function createWorkspaceWindow() {
 
     show: false,
     title:
-      `ChatGPT Multi Pane v4.6.1 — Active 1/${appConfig.paneCount}`,
+      `ChatGPT Multi Pane v4.6.2 — Active 1/${appConfig.paneCount}`,
     backgroundColor: "#111111",
 
     webPreferences: {
@@ -3888,12 +3899,12 @@ function registerShortcut(
       );
 
     console.log(
-      `[Integration v4.6.1] shortcut ${label}: ` +
+      `[Integration v4.6.2] shortcut ${label}: ` +
       `${accelerator}, registered=${registered}`
     );
   } catch (error) {
     console.error(
-      `[Integration v4.6.1] shortcut ${label} failed:`,
+      `[Integration v4.6.2] shortcut ${label} failed:`,
       error.message
     );
   }
@@ -4124,7 +4135,7 @@ ipcMain.on(
       });
 
       console.log(
-        "[Integration v4.6.1] dialog shape locked:",
+        "[Integration v4.6.2] dialog shape locked:",
         lockedDialogRect
       );
     } else if (
@@ -4295,7 +4306,7 @@ ipcMain.on(
         reason: "no-overlay-dialog"
       });
       console.log(
-        "[Integration v4.6.1] ignored stray dialog close intent"
+        "[Integration v4.6.2] ignored stray dialog close intent"
       );
 
       return;
@@ -4400,7 +4411,7 @@ ipcMain.on(
         reason: "duplicate-route-guard"
       });
       console.log(
-        "[Integration v4.6.1] suppressed sidebar route intent:",
+        "[Integration v4.6.2] suppressed sidebar route intent:",
         url
       );
     }
@@ -4492,7 +4503,7 @@ ipcMain.on(
       settingsOutsideEscapeGeneration = null;
       settingsInjectedEscapeCloseIntentGeneration = null;
       console.error(
-        "[Integration v4.6.1] Settings outside click input failed:",
+        "[Integration v4.6.2] Settings outside click input failed:",
         error.message
       );
     }
@@ -4540,17 +4551,17 @@ app.whenReady().then(() => {
   );
 
   console.log(
-    "[Integration v4.6.1] Electron:",
+    "[Integration v4.6.2] Electron:",
     process.versions.electron
   );
 
   console.log(
-    "[Integration v4.6.1] userData:",
+    "[Integration v4.6.2] userData:",
     app.getPath("userData")
   );
 
   console.log(
-    "[Integration v4.6.1] restored pane count:",
+    "[Integration v4.6.2] restored pane count:",
     appConfig.paneCount
   );
 

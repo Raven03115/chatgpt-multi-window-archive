@@ -2,6 +2,16 @@
 
 本文件記錄各版本的重要功能、修正與行為變更。
 
+## v4.6.2 — 2026-07-29
+
+- 修正部分裝置在 Electron 應用程式內使用 Google 登入時，出現「瀏覽器不支援 JavaScript」頁面的問題。
+- 僅在主框架導覽至 `https://accounts.google.com` 時，暫時移除 User-Agent 中的 `Electron/<version>` token；返回 ChatGPT 後恢復原始 User-Agent。
+- 相容處理改為預設掛載，但非 Google 登入導覽時不會改寫 User-Agent。
+- 不複製或修改 Cookie、Token、Authorization、Session、TLS 或全域 Session User-Agent。
+- 新增正式整合回歸測試，完整自動測試增加至 124 項。
+- 已在開發裝置及原本發生錯誤的另一台裝置完成真實 Google 登入驗收。
+- 此相容處理不代表 Google 官方支援所有 Electron 內嵌登入流程。
+
 ## v4.6.1 — 2026-07-22
 
 - 修正 Electron 應用程式中排程暫停、恢復、文字與時間編輯及刪除操作回傳錯誤的問題。
