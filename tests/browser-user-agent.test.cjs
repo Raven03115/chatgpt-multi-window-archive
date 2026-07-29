@@ -69,11 +69,17 @@ test("Settings and Upgrade document or XHR requests retain the Electron UA", () 
   }
 });
 
-test("only observed automations GET collection and POST item requests remove Electron", () => {
+test("only observed automations collection, detail GET, and item POST requests remove Electron", () => {
   for (const details of [
     requestDetails("https://chatgpt.com/backend-api/automations"),
     requestDetails("https://chatgpt.com/backend-api/automations/"),
     requestDetails("https://chatgpt.com/backend-api/automations?limit=20"),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automation/fixture-item-id"
+    ),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automation/fixture-item-id?source=scheduled"
+    ),
     requestDetails(
       "https://chatgpt.com/backend-api/automations/fixture-item-id",
       { method: "POST" }
@@ -100,6 +106,15 @@ test("other backend requests and non-page requests retain the original UA", () =
     requestDetails("https://chatgpt.com/backend-api/conversations"),
     requestDetails("https://chatgpt.com/backend-api/automations/jobs"),
     requestDetails("https://chatgpt.com/backend-api/automations-malicious"),
+    requestDetails("https://chatgpt.com/backend-api/automation-malicious"),
+    requestDetails("https://chatgpt.com/backend-api/automation"),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automation/fixture-item-id/action"
+    ),
+    requestDetails(
+      "https://chatgpt.com/backend-api/automation/fixture-item-id",
+      { method: "POST" }
+    ),
     requestDetails("https://example.com/backend-api/automations"),
     requestDetails("https://chatgpt.com.evil.test/backend-api/automations"),
     requestDetails("https://chatgpt.com:444/backend-api/automations"),
@@ -143,6 +158,12 @@ test("supported automations matcher is limited to the observed method and route 
   assert.equal(isSupportedAutomationsRequest(requestDetails(
     "https://chatgpt.com/backend-api/automations/fixture-item-id",
     { method: "GET" }
+  )), false);
+  assert.equal(isSupportedAutomationsRequest(requestDetails(
+    "https://chatgpt.com/backend-api/automation/fixture-item-id"
+  )), true);
+  assert.equal(isSupportedAutomationsRequest(requestDetails(
+    "https://chatgpt.com/backend-api/automation/fixture-item-id/action"
   )), false);
   assert.equal(isSupportedAutomationsRequest(requestDetails(
     "https://chatgpt.com/backend-api/automations/fixture-item-id/action",
@@ -235,7 +256,10 @@ test("shared session installs one composable request-header listener", () => {
 
   assert.equal(registrations.length, 1);
   assert.deepEqual(registrations[0].filter, {
-    urls: ["https://chatgpt.com/backend-api/automations*"]
+    urls: [
+      "https://chatgpt.com/backend-api/automations*",
+      "https://chatgpt.com/backend-api/automation*"
+    ]
   });
 
   let callbackResult = null;
