@@ -17,15 +17,6 @@ app.setPath(
   )
 );
 
-const {
-  installTransparentCompactDialogCompatibility
-} = require("../../lib/transparent-compact-dialog-compat.cjs");
-
-installTransparentCompactDialogCompatibility({
-  app,
-  shouldApplyToUrl: () => true
-});
-
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -143,8 +134,7 @@ async function run() {
       dialog.appendChild(panel);
 
       // Match the current ChatGPT portal shape: the active dialog can be a
-      // direct body child, where the overlay preload intentionally applies
-      // `body > div { background-color: transparent !important; }`.
+      // direct body child whose own root background remains transparent.
       document.body.appendChild(dialog);
     })()
   `);
