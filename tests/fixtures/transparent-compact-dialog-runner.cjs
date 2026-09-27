@@ -108,7 +108,6 @@ async function run() {
             <main style="position:absolute;left:260px;top:0;width:940px;height:800px">
               workspace
             </main>
-            <div id="portal-root"></div>
           </body>
         </html>`)
   );
@@ -142,7 +141,11 @@ async function run() {
       ].join("");
 
       dialog.appendChild(panel);
-      document.getElementById("portal-root").appendChild(dialog);
+
+      // Match the current ChatGPT portal shape: the active dialog can be a
+      // direct body child, where the overlay preload intentionally applies
+      // `body > div { background-color: transparent !important; }`.
+      document.body.appendChild(dialog);
     })()
   `);
 
