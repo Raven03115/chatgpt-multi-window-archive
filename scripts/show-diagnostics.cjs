@@ -70,44 +70,22 @@ function formatEvent(event) {
     ["stage", "stage"],
     ["method", "method"],
     ["resource", "resourceType"],
-    ["webContents", "webContentsKind"],
-    ["tag", "surfaceTag"],
-    ["role", "surfaceRole"],
-    ["state", "surfaceState"],
-    ["testid", "surfaceTestId"],
-    ["position", "surfacePosition"],
-    ["visibility", "surfaceVisibility"],
-    ["display", "surfaceDisplay"],
-    ["pointerEvents", "surfacePointerEvents"]
+    ["webContents", "webContentsKind"]
   ]) {
     if (event[key] !== undefined) {
       values.push(`${label}=${safe(event[key])}`);
     }
   }
 
-  for (const [label, key] of [
-    ["elapsedMs", "elapsedMs"],
-    ["rectWidth", "rectWidth"],
-    ["rectHeight", "rectHeight"],
-    ["rectCount", "rectCount"],
-    ["status", "statusCode"]
-  ]) {
-    if (Number.isFinite(event[key])) {
-      values.push(`${label}=${event[key]}`);
-    }
+  if (Number.isFinite(event.statusCode)) {
+    values.push(`status=${event.statusCode}`);
   }
 
   for (const [label, key] of [
     ["networkError", "networkError"],
     ["uaHadElectron", "originalUserAgentHasElectronToken"],
     ["electronRemoved", "electronMarkerRemoved"],
-    ["requestMatched", "matchedAutomationsRequest"],
-    ["insideMain", "surfaceInsideMain"],
-    ["ariaModal", "surfaceAriaModal"],
-    ["hasInput", "surfaceHasInput"],
-    ["hasButton", "surfaceHasButton"],
-    ["addedAfterAction", "surfaceAddedAfterAction"],
-    ["containsAddedNode", "surfaceContainsAddedNode"]
+    ["requestMatched", "matchedAutomationsRequest"]
   ]) {
     if (typeof event[key] === "boolean") {
       values.push(`${label}=${event[key]}`);
