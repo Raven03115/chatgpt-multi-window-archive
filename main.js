@@ -2,6 +2,10 @@ const { app } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
+const {
+  installNestedDialogVisibilityCompatibility
+} = require("./lib/nested-dialog-visibility-compat.cjs");
+
 const USER_DATA_PATH = path.join(
   app.getPath("appData"),
   "chatgpt-multi-window"
@@ -13,6 +17,8 @@ const CONFIG_PATH = path.join(
 );
 
 app.setPath("userData", USER_DATA_PATH);
+
+installNestedDialogVisibilityCompatibility({ app });
 
 try {
   if (!fs.existsSync(CONFIG_PATH)) {
