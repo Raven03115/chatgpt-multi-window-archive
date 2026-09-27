@@ -40,8 +40,13 @@ jobs:
           node --check tests/sidebar-geometry.test.cjs
           node --check tests/sidebar-width-integration.test.cjs
 
+      - name: Prepare Electron sandbox
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
       - name: Full repository verification
-        run: npm run verify
+        run: xvfb-run -a npm run verify
 
       - name: Diff validation
         run: git diff --check
