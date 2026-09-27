@@ -91,11 +91,11 @@ test("successful and sidebar requests are not logged as pane failures", () => {
   );
 });
 
-test("network errors preserve only generic error and endpoint classification", () => {
+test("network errors preserve only a generic error label and endpoint classification", () => {
   const event = createPaneNetworkFailureEvent(
     details("https://chatgpt.com/backend-api/conversation/fixture", {
       statusCode: undefined,
-      error: "net::ERR_CONNECTION_RESET"
+      error: "net::ERR_CONNECTION_RESET_PRIVATE"
     }),
     {
       resolveWebContentsKind,
@@ -106,7 +106,11 @@ test("network errors preserve only generic error and endpoint classification", (
   assert.equal(event.routeKind, "conversation-api");
   assert.equal(event.reason, "network-error");
   assert.equal(event.networkError, true);
-  assert.equal(event.errorName, "net::ERR_CONNECTION_RESET");
+  assert.equal(event.errorName, "NetworkError");
+  assert.doesNotMatch(
+    JSON.stringify(event),
+    /ERR_CONNECTION_RESET_PRIVATE/
+  );
 });
 
 test("shared request hook captures pane failures without enabling automations diagnostics", () => {
