@@ -17,6 +17,15 @@ app.setPath(
   )
 );
 
+const {
+  installTransparentCompactDialogCompatibility
+} = require("../../lib/transparent-compact-dialog-compat.cjs");
+
+installTransparentCompactDialogCompatibility({
+  app,
+  shouldApplyToUrl: () => true
+});
+
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
