@@ -107,6 +107,8 @@ async function run() {
         </html>`)
   );
 
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
   const beforeState = await window.webContents.executeJavaScript(`
     ({
       mainVisibility: getComputedStyle(document.getElementById("workspace")).visibility,
