@@ -42,10 +42,9 @@ jobs:
 
       - name: Prepare Electron sandbox
         run: |
-          ELECTRON_PATH="$(node -e "process.stdout.write(require('electron'))")"
-          echo "Electron path: $ELECTRON_PATH"
-          sudo chown root:root "$(dirname "$ELECTRON_PATH")/chrome-sandbox"
-          sudo chmod 4755 "$(dirname "$ELECTRON_PATH")/chrome-sandbox"
+          node -e "require('electron')"
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
       - name: Full repository verification
         run: xvfb-run -a npm run verify
