@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 const {
-  installNestedDialogVisibilityCompatibility
-} = require("./lib/nested-dialog-visibility-compat.cjs");
+  installNativeMenuActionSurfaceDiagnostics
+} = require("./lib/native-menu-surface-diagnostics.cjs");
 
 const USER_DATA_PATH = path.join(
   app.getPath("appData"),
@@ -18,7 +18,7 @@ const CONFIG_PATH = path.join(
 
 app.setPath("userData", USER_DATA_PATH);
 
-installNestedDialogVisibilityCompatibility({ app });
+installNativeMenuActionSurfaceDiagnostics({ app });
 
 try {
   if (!fs.existsSync(CONFIG_PATH)) {
