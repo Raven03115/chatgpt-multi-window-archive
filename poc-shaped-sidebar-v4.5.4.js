@@ -41,11 +41,16 @@ const {
   replacePopupRects,
   transitionOverlayState
 } = require("./lib/overlay-policy.cjs");
+const {
+  DEFAULT_SIDEBAR_WIDTH,
+  normalizeSidebarWidth,
+  shouldUpdateSidebarWidth
+} = require("./lib/sidebar-geometry.cjs");
 
 const CHATGPT_URL = "https://chatgpt.com";
 const CHATGPT_PARTITION = "persist:chatgpt-shared";
 
-const SIDEBAR_WIDTH = 260;
+let sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
 
 const DEFAULT_PANE_COUNT = 1;
 const ALLOWED_PANE_COUNTS = new Set([
@@ -739,7 +744,7 @@ function getPaneBounds(index) {
 
   const availableWidth = Math.max(
     400,
-    content.width - SIDEBAR_WIDTH
+    content.width - sidebarWidth
   );
 
   const {
@@ -778,7 +783,7 @@ function getPaneBounds(index) {
   );
 
   return {
-    x: SIDEBAR_WIDTH + left,
+    x: sidebarWidth + left,
     y: top,
     width: right - left,
     height: bottom - top
@@ -3227,7 +3232,7 @@ function sanitizeRect(rect, windowBounds) {
   }
 
   const x = Math.max(
-    SIDEBAR_WIDTH,
+    sidebarWidth,
     Math.floor(sourceX)
   );
 
@@ -3432,7 +3437,7 @@ function applyOverlayShape() {
     shapeRects = buildOverlayShape({
       mode: overlayRuntimeState.mode,
       bounds,
-      sidebarWidth: SIDEBAR_WIDTH,
+      sidebarWidth: sidebarWidth,
       dialogRect: sanitizedDialog,
       popupRects: sanitizedPopupRects,
       captureWorkspaceInput:
@@ -4027,6 +4032,48 @@ function registerShortcuts() {
 }
 
 ipcMain.on(
+  "chatgpt-sidebar-width-changed",
+  (event, payload) => {
+    if (
+      !isUsableWindow(sidebarOverlayWindow) ||
+      event.sender.id !==
+        sidebarOverlayWindow.webContents.id
+    ) {
+      return;
+    }
+
+    const workspace = getWorkspaceContentSize();
+    const nextWidth = normalizeSidebarWidth(
+      payload?.width,
+      workspace.width
+    );
+
+    if (
+      !shouldUpdateSidebarWidth(
+        sidebarWidth,
+        nextWidth
+      )
+    ) {
+      return;
+    }
+
+    sidebarWidth = nextWidth;
+    lastAppliedOverlayShapeSignature = "";
+
+    layoutPaneViews();
+    applyOverlayShape();
+
+    recordIntegrationEvent({
+      event: "sidebar-width-changed",
+      source: "sidebar-preload",
+      action: "apply",
+      reason: "measured-sidebar-geometry",
+      rectWidth: sidebarWidth
+    });
+  }
+);
+
+ipcMain.on(
   "chatgpt-sidebar-shape-state",
   (event, state) => {
     if (!isUsableWindow(sidebarOverlayWindow)) {
@@ -4595,6 +4642,10 @@ app.on("will-quit", () => {
   }
 
   globalShortcut.unregisterAll();
+
+  ipcMain.removeAllListeners(
+    "chatgpt-sidebar-width-changed"
+  );
 
   ipcMain.removeAllListeners(
     "chatgpt-sidebar-diagnostic-event"

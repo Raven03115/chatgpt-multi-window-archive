@@ -1,6 +1,21 @@
 const { ipcRenderer } = require("electron");
 
-const SIDEBAR_WIDTH = 260;
+const DEFAULT_SIDEBAR_WIDTH = 260;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 420;
+let sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+
+const SIDEBAR_SURFACE_SELECTORS = [
+  "#stage-slideover-sidebar",
+  '[data-testid="sidebar"]',
+  '[data-testid="sidebar-container"]',
+  '[data-testid="conversation-sidebar"]',
+  'nav[aria-label="Chat history"]',
+  'nav[aria-label*="聊天"]',
+  'nav[aria-label*="對話"]',
+  'aside:has(a[href^="/c/"])',
+  'aside:has(a[href*="/c/"])'
+];
 const MAX_RECTS = 24;
 
 const SMALL_POPUP_PADDING = 3;
@@ -127,6 +142,7 @@ let popupResizeObserver = null;
 let observedDialogSurface = null;
 let observedPopupSurfaces = new Set();
 let reportAnimationFrame = null;
+let sidebarWidthAnimationFrame = null;
 let interactionReportTimers = new Set();
 let started = false;
 let lastSignature = "";
@@ -198,6 +214,127 @@ function collectElements(selectors) {
   }
 
   return [...result];
+}
+
+function normalizeMeasuredSidebarWidth(value) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+
+  return Math.round(
+    Math.min(
+      MAX_SIDEBAR_WIDTH,
+      Math.max(MIN_SIDEBAR_WIDTH, numeric)
+    )
+  );
+}
+
+function getOfficialSidebarCssWidth() {
+  let measured = 0;
+
+  for (const root of [
+    document.documentElement,
+    document.body
+  ]) {
+    if (!root) {
+      continue;
+    }
+
+    try {
+      const rawValue = window
+        .getComputedStyle(root)
+        .getPropertyValue("--sidebar-width");
+      const parsed = Number.parseFloat(rawValue);
+
+      if (
+        Number.isFinite(parsed) &&
+        parsed >= MIN_SIDEBAR_WIDTH &&
+        parsed <= MAX_SIDEBAR_WIDTH
+      ) {
+        measured = Math.max(measured, parsed);
+      }
+    } catch {
+      // Ignore transient style reads.
+    }
+  }
+
+  return measured;
+}
+
+function measureSidebarWidth() {
+  let measured = getOfficialSidebarCssWidth();
+  const minimumCandidateHeight = Math.min(
+    240,
+    Math.max(120, window.innerHeight * 0.35)
+  );
+
+  for (
+    const element of collectElements(
+      SIDEBAR_SURFACE_SELECTORS
+    )
+  ) {
+    if (!isVisible(element)) {
+      continue;
+    }
+
+    const rect = getRect(element);
+
+    if (
+      rect.left < -80 ||
+      rect.left > 12 ||
+      rect.height < minimumCandidateHeight ||
+      rect.right < MIN_SIDEBAR_WIDTH ||
+      rect.right > MAX_SIDEBAR_WIDTH
+    ) {
+      continue;
+    }
+
+    measured = Math.max(measured, rect.right);
+  }
+
+  return normalizeMeasuredSidebarWidth(
+    measured || DEFAULT_SIDEBAR_WIDTH
+  );
+}
+
+function syncSidebarWidth() {
+  const nextWidth = measureSidebarWidth();
+
+  if (Math.abs(nextWidth - sidebarWidth) < 1) {
+    return false;
+  }
+
+  sidebarWidth = nextWidth;
+  lastSignature = "";
+
+  ipcRenderer.send(
+    "chatgpt-sidebar-width-changed",
+    { width: sidebarWidth }
+  );
+
+  reportDiagnostic({
+    event: "sidebar-width-changed",
+    action: "measure",
+    reason: "official-sidebar-geometry",
+    rectWidth: sidebarWidth
+  });
+
+  scheduleFrameReport();
+  return true;
+}
+
+function scheduleSidebarWidthSync() {
+  if (sidebarWidthAnimationFrame !== null) {
+    return;
+  }
+
+  sidebarWidthAnimationFrame =
+    requestAnimationFrame(() => {
+      sidebarWidthAnimationFrame = null;
+      syncSidebarWidth();
+    });
 }
 
 function getMetadata(element) {
@@ -331,7 +468,7 @@ function getDialogSurfaceKind(
 
   if (
     rect.right <=
-    SIDEBAR_WIDTH + 1
+    sidebarWidth + 1
   ) {
     return "non-dialog";
   }
@@ -505,7 +642,7 @@ function normalizeRawRect(
   padding
 ) {
   const left = Math.max(
-    SIDEBAR_WIDTH,
+    sidebarWidth,
     Math.floor(
       rawRect.left - padding
     )
@@ -758,7 +895,7 @@ function collectSmallPopupSurfaces(
 
     if (
       rawRect.right <=
-      SIDEBAR_WIDTH + 1
+      sidebarWidth + 1
     ) {
       continue;
     }
@@ -889,6 +1026,7 @@ function syncPopupResizeObservers(elements) {
 }
 
 function reportShapeState() {
+  syncSidebarWidth();
   const dialogSurface =
     findBestDialogSurface();
   const dialogRect =
@@ -1210,6 +1348,10 @@ function getControlKind(control) {
     return "role-button";
   }
 
+  if (role === "link") {
+    return "role-link";
+  }
+
   if (role === "menuitem") {
     return "menuitem";
   }
@@ -1364,7 +1506,7 @@ function getControlElement(target) {
   }
 
   return target.closest(
-    'a[href], button, [role="button"], [role="menuitem"]'
+    'a[href], button, [role="button"], [role="link"], [role="menuitem"]'
   );
 }
 
@@ -1521,7 +1663,7 @@ function handleSettingsOutsidePointerDown(event) {
   if (
     activeOverlayOnlyKind !== "settings" ||
     !isPrimaryTrustedPointer(event) ||
-    event.clientX <= SIDEBAR_WIDTH ||
+    event.clientX <= sidebarWidth ||
     pointIsInsideOverlaySurface(event.clientX, event.clientY)
   ) {
     return;
@@ -1551,7 +1693,7 @@ function handleSettingsOutsidePointerUp(event) {
     isPrimaryTrustedPointer(event) &&
     event.pointerId === gesture.pointerId &&
     distance <= SETTINGS_OUTSIDE_CLICK_MAX_DISTANCE &&
-    event.clientX > SIDEBAR_WIDTH &&
+    event.clientX > sidebarWidth &&
     !pointIsInsideOverlaySurface(event.clientX, event.clientY);
 
   if (!valid) {
@@ -1583,7 +1725,7 @@ function handleSettingsOutsideClick(event) {
 
   if (
     distance > SETTINGS_OUTSIDE_CLICK_MAX_DISTANCE ||
-    event.clientX <= SIDEBAR_WIDTH ||
+    event.clientX <= sidebarWidth ||
     pointIsInsideOverlaySurface(event.clientX, event.clientY)
   ) {
     settingsOutsidePointerGesture = null;
@@ -1869,6 +2011,7 @@ function startDetection() {
 
   observer = new MutationObserver((records) => {
     installOverlayIsolationStyle();
+    scheduleSidebarWidthSync();
     const checkedAttributeTargets = new Set();
 
     if (records.some((record) => {
@@ -1956,9 +2099,13 @@ function startDetection() {
 
   window.addEventListener(
     "resize",
-    scheduleFrameReport
+    () => {
+      scheduleSidebarWidthSync();
+      scheduleFrameReport();
+    }
   );
 
+  scheduleSidebarWidthSync();
   scheduleFrameReport();
 }
 
@@ -1993,6 +2140,11 @@ window.addEventListener(
     if (reportAnimationFrame !== null) {
       cancelAnimationFrame(reportAnimationFrame);
       reportAnimationFrame = null;
+    }
+
+    if (sidebarWidthAnimationFrame !== null) {
+      cancelAnimationFrame(sidebarWidthAnimationFrame);
+      sidebarWidthAnimationFrame = null;
     }
 
     clearReportBurstTimers();

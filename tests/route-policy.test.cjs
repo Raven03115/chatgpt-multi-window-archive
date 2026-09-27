@@ -53,7 +53,7 @@ test("sidebar preload resolves nested targets through the full actionable-contro
 
   assert.match(
     preloadSource,
-    /return target\.closest\(\s*'a\[href\], button, \[role="button"\], \[role="menuitem"\]'\s*\)/
+    /return target\.closest\(\s*'a\[href\], button, \[role="button"\], \[role="link"\], \[role="menuitem"\]'\s*\)/
   );
 });
 
