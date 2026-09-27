@@ -12,6 +12,7 @@ const {
 const {
   CONSOLE_PREFIX,
   buildNativeMenuActionDiagnosticsScript,
+  extractConsoleMessage,
   normalizeSurfaceDiagnostic
 } = require("../lib/native-menu-surface-diagnostics.cjs");
 
@@ -91,6 +92,21 @@ test("native menu diagnostics rejects unsupported event names and unsafe attribu
 
   assert.equal(normalized.surfaceRole, "dialog");
   assert.equal(normalized.surfaceTestId, "[redacted-attribute]");
+});
+
+test("console message extraction supports current and legacy Electron event shapes", () => {
+  assert.equal(
+    extractConsoleMessage(
+      { message: `${CONSOLE_PREFIX}{}` },
+      "legacy"
+    ),
+    `${CONSOLE_PREFIX}{}`
+  );
+  assert.equal(
+    extractConsoleMessage(1, `${CONSOLE_PREFIX}{}`),
+    `${CONSOLE_PREFIX}{}`
+  );
+  assert.equal(extractConsoleMessage(null, null), "");
 });
 
 test("structural surface metadata survives the shared diagnostics allowlist", (t) => {
