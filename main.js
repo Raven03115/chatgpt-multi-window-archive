@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 const {
-  installNativeMenuActionSurfaceDiagnostics
-} = require("./lib/native-menu-surface-diagnostics.cjs");
+  installTransparentCompactDialogCompatibility
+} = require("./lib/transparent-compact-dialog-compat.cjs");
 
 const USER_DATA_PATH = path.join(
   app.getPath("appData"),
@@ -18,7 +18,7 @@ const CONFIG_PATH = path.join(
 
 app.setPath("userData", USER_DATA_PATH);
 
-installNativeMenuActionSurfaceDiagnostics({ app });
+installTransparentCompactDialogCompatibility({ app });
 
 try {
   if (!fs.existsSync(CONFIG_PATH)) {
