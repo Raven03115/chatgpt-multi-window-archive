@@ -2,10 +2,6 @@ const { app } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
-const {
-  installTransparentCompactDialogCompatibility
-} = require("./lib/transparent-compact-dialog-compat.cjs");
-
 const USER_DATA_PATH = path.join(
   app.getPath("appData"),
   "chatgpt-multi-window"
@@ -17,8 +13,6 @@ const CONFIG_PATH = path.join(
 );
 
 app.setPath("userData", USER_DATA_PATH);
-
-installTransparentCompactDialogCompatibility({ app });
 
 try {
   if (!fs.existsSync(CONFIG_PATH)) {
