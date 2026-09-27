@@ -505,7 +505,6 @@ function getDialogSurfaceKind(
 
   if (
     meetsCompactSize &&
-    hasOpaqueBackground(element) &&
     hasExplicitRootSemantic &&
     !meetsStandardSize
   ) {
