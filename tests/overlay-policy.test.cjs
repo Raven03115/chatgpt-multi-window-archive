@@ -222,6 +222,18 @@ test("every explicit dialog root semantic classifies compact confirmations", () 
   }
 });
 
+test("transparent explicit compact dialog roots remain valid", () => {
+  assert.equal(classifyDialogSurface(visibleDialogFacts({
+    role: "dialog",
+    ariaModal: true,
+    opaque: false,
+    width: 420,
+    height: 188,
+    interactiveControlCount: 3,
+    isRootSurface: true
+  })), "compact-confirmation");
+});
+
 test("a real plain role dialog root at 448 by 176 is a compact confirmation", () => {
   assert.equal(classifyDialogSurface(visibleDialogFacts({
     role: "dialog",
@@ -275,13 +287,12 @@ test("large Settings dialogs remain valid while fullscreen wrappers and backdrop
   })), "backdrop");
 });
 
-test("menus, tooltips, popovers, hidden, transparent, and detached nodes are not dialogs", () => {
+test("menus, tooltips, popovers, hidden, and detached nodes are not dialogs", () => {
   for (const facts of [
     { role: "menu" },
     { role: "tooltip" },
     { popover: true },
     { role: "alertdialog", visible: false },
-    { role: "alertdialog", opaque: false },
     { role: "alertdialog", connected: false },
     { ariaModal: true, isRootSurface: false }
   ]) {
