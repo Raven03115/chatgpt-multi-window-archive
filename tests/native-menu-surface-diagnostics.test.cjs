@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -171,6 +172,84 @@ test("structural surface metadata survives the shared diagnostics allowlist", (t
   assert.equal(record.surfaceAddedAfterAction, true);
   assert.equal(record.rectWidth, 480);
   assert.equal(record.rectHeight, 220);
+});
+
+test("diagnostics command prints structural surface fields without user content", (t) => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "chatgpt-native-menu-show-")
+  );
+  t.after(() => fs.rmSync(
+    directory,
+    { recursive: true, force: true }
+  ));
+
+  const logDirectory = path.join(directory, "logs");
+  const logPath = path.join(
+    logDirectory,
+    "integration-events.jsonl"
+  );
+  fs.mkdirSync(logDirectory, { recursive: true });
+  fs.writeFileSync(
+    logPath,
+    `${JSON.stringify({
+      timestamp: "2026-09-28T00:00:00.000Z",
+      event: "native-menu-surface-snapshot",
+      action: "inspect",
+      reason: "post-native-menu-action",
+      elapsedMs: 150,
+      rectWidth: 420,
+      rectHeight: 180,
+      rectCount: 1,
+      surfaceTag: "section",
+      surfaceRole: "dialog",
+      surfaceState: "open",
+      surfaceTestId: "rename-modal",
+      surfacePosition: "fixed",
+      surfaceVisibility: "visible",
+      surfaceDisplay: "flex",
+      surfacePointerEvents: "auto",
+      surfaceInsideMain: true,
+      surfaceAriaModal: true,
+      surfaceHasInput: true,
+      surfaceHasButton: true,
+      surfaceAddedAfterAction: true,
+      surfaceContainsAddedNode: true,
+      unsafeText: "private conversation title"
+    })}\n`,
+    "utf8"
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(
+        __dirname,
+        "..",
+        "scripts",
+        "show-diagnostics.cjs"
+      ),
+      "--last",
+      "20"
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CHATGPT_MULTI_WINDOW_USER_DATA: directory
+      }
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /role=dialog/);
+  assert.match(result.stdout, /testid=rename-modal/);
+  assert.match(result.stdout, /insideMain=true/);
+  assert.match(result.stdout, /ariaModal=true/);
+  assert.match(result.stdout, /hasInput=true/);
+  assert.equal(
+    result.stdout.includes("private conversation title"),
+    false
+  );
 });
 
 test("browser diagnostic script observes native menuitem actions without reading user content", () => {
