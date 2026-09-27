@@ -101,25 +101,51 @@ async function run() {
             <aside style="position:absolute;left:0;top:0;width:260px;height:800px"></aside>
             <main id="workspace" style="position:absolute;left:260px;top:0;width:940px;height:800px">
               <section id="conversation-content">conversation workspace</section>
-              <div id="dialog-host">
-                <section
-                  id="rename-dialog"
-                  role="dialog"
-                  aria-modal="true"
-                  data-state="open"
-                  style="position:absolute;left:180px;top:180px;width:420px;height:180px;background:#333;border-radius:12px"
-                >
-                  <input id="rename-input" value="fixture">
-                  <div id="closed-option" style="visibility:hidden">hidden option</div>
-                  <button id="rename-cancel">cancel</button>
-                </section>
-              </div>
+              <div id="dialog-host"></div>
             </main>
           </body>
         </html>`)
   );
 
-  const dialogRect = await waitForDialogRect();
+  const beforeState = await window.webContents.executeJavaScript(`
+    ({
+      mainVisibility: getComputedStyle(document.getElementById("workspace")).visibility,
+      workspaceVisibility: getComputedStyle(document.getElementById("conversation-content")).visibility
+    })
+  `);
+
+  assert(
+    beforeState.mainVisibility === "hidden" &&
+      beforeState.workspaceVisibility === "hidden",
+    "workspace was not isolated before opening the nested dialog"
+  );
+
+  const dialogRectPromise = waitForDialogRect();
+
+  await window.webContents.executeJavaScript(`
+    (() => {
+      const dialog = document.createElement("section");
+      dialog.id = "rename-dialog";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("data-state", "open");
+      dialog.style.position = "absolute";
+      dialog.style.left = "180px";
+      dialog.style.top = "180px";
+      dialog.style.width = "420px";
+      dialog.style.height = "180px";
+      dialog.style.background = "#333";
+      dialog.style.borderRadius = "12px";
+      dialog.innerHTML = [
+        '<input id="rename-input" value="fixture">',
+        '<div id="closed-option" style="visibility:hidden">hidden option</div>',
+        '<button id="rename-cancel">cancel</button>'
+      ].join("");
+      document.getElementById("dialog-host").appendChild(dialog);
+    })()
+  `);
+
+  const dialogRect = await dialogRectPromise;
 
   assert(
     dialogRect.width >= 400 &&
@@ -152,6 +178,24 @@ async function run() {
   assert(
     state.hiddenOptionVisibility === "hidden",
     "compatibility CSS forced a hidden dialog descendant visible"
+  );
+
+  await window.webContents.executeJavaScript(`
+    document.getElementById("rename-dialog")?.remove()
+  `);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  const afterState = await window.webContents.executeJavaScript(`
+    ({
+      mainVisibility: getComputedStyle(document.getElementById("workspace")).visibility,
+      workspaceVisibility: getComputedStyle(document.getElementById("conversation-content")).visibility
+    })
+  `);
+
+  assert(
+    afterState.mainVisibility === "hidden" &&
+      afterState.workspaceVisibility === "hidden",
+    "workspace isolation was not restored after closing the nested dialog"
   );
 
   window.destroy();
