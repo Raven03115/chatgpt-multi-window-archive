@@ -1,8 +1,14 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
+const {
+  createDiagnosticsLogger
+} = require("../lib/diagnostics.cjs");
 const {
   CONSOLE_PREFIX,
   buildNativeMenuActionDiagnosticsScript,
@@ -85,6 +91,70 @@ test("native menu diagnostics rejects unsupported event names and unsafe attribu
 
   assert.equal(normalized.surfaceRole, "dialog");
   assert.equal(normalized.surfaceTestId, "[redacted-attribute]");
+});
+
+test("structural surface metadata survives the shared diagnostics allowlist", (t) => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "chatgpt-native-menu-diag-")
+  );
+  t.after(() => fs.rmSync(
+    directory,
+    { recursive: true, force: true }
+  ));
+
+  const logPath = path.join(
+    directory,
+    "integration-events.jsonl"
+  );
+  const logger = createDiagnosticsLogger({
+    logPath,
+    clock: () => new Date("2026-09-28T00:00:00.000Z")
+  });
+
+  const normalized = normalizeSurfaceDiagnostic({
+    event: "native-menu-surface-snapshot",
+    action: "inspect",
+    reason: "post-native-menu-action",
+    elapsedMs: 50,
+    rectWidth: 480,
+    rectHeight: 220,
+    rectCount: 1,
+    surfaceTag: "section",
+    surfaceRole: "dialog",
+    surfaceState: "open",
+    surfaceTestId: "rename-modal",
+    surfacePosition: "fixed",
+    surfaceVisibility: "visible",
+    surfaceDisplay: "flex",
+    surfacePointerEvents: "auto",
+    surfaceInsideMain: false,
+    surfaceAriaModal: true,
+    surfaceHasInput: true,
+    surfaceHasButton: true,
+    surfaceAddedAfterAction: true,
+    surfaceContainsAddedNode: true
+  });
+
+  assert.equal(logger.log(normalized), true);
+
+  const record = JSON.parse(
+    fs.readFileSync(logPath, "utf8").trim()
+  );
+
+  assert.equal(record.surfaceTag, "section");
+  assert.equal(record.surfaceRole, "dialog");
+  assert.equal(record.surfaceState, "open");
+  assert.equal(record.surfaceTestId, "rename-modal");
+  assert.equal(record.surfacePosition, "fixed");
+  assert.equal(record.surfaceVisibility, "visible");
+  assert.equal(record.surfaceDisplay, "flex");
+  assert.equal(record.surfacePointerEvents, "auto");
+  assert.equal(record.surfaceInsideMain, false);
+  assert.equal(record.surfaceAriaModal, true);
+  assert.equal(record.surfaceHasInput, true);
+  assert.equal(record.surfaceAddedAfterAction, true);
+  assert.equal(record.rectWidth, 480);
+  assert.equal(record.rectHeight, 220);
 });
 
 test("browser diagnostic script observes native menuitem actions without reading user content", () => {
