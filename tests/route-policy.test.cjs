@@ -266,10 +266,12 @@ test("native Project workspace without explicit intent is ignored", () => {
   );
 });
 
-test("native Project workspace with one-time explicit intent forwards", () => {
+test("native workspace routes with one-time explicit button intent forward", () => {
   for (const routeKind of [
+    "conversation",
     "project-workspace",
-    "project-conversation"
+    "project-conversation",
+    "unknown-workspace"
   ]) {
     assertAction(
       decide({
@@ -375,7 +377,7 @@ test("Project intent is valid only for its pane, generation, lifetime, and unuse
   );
 });
 
-test("Project intent never forwards an ordinary native conversation", () => {
+test("explicit sidebar action intent forwards an ordinary native conversation", () => {
   assertAction(
     decide({
       routeKind: "conversation",
@@ -385,8 +387,42 @@ test("Project intent never forwards an ordinary native conversation", () => {
       currentProjectIntentGeneration: 7,
       now: TEST_NOW
     }),
-    "ignore-native-route"
+    "forward-to-pane"
   );
+});
+
+test("explicit sidebar action intent forwards a native unknown workspace route", () => {
+  assertAction(
+    decide({
+      routeKind: classifyRoute("https://chatgpt.com/library"),
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 2,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    }),
+    "forward-to-pane"
+  );
+});
+
+test("explicit sidebar action intent still cannot forward overlay, external, blocked, or invalid routes", () => {
+  for (const routeKind of [
+    "overlay-only",
+    "external-account",
+    "blocked",
+    "invalid"
+  ]) {
+    const result = decide({
+      routeKind,
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 2,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    });
+
+    assert.notEqual(result.action, "forward-to-pane");
+  }
 });
 
 test("Project intent cannot forward after the active pane changes", () => {
@@ -461,7 +497,7 @@ test("login, auth, and backend API routes are rejected", () => {
   }
 });
 
-test("ordinary native conversation never forwards without explicit anchor intent", () => {
+test("ordinary native conversation never forwards without explicit intent", () => {
   assertAction(
     decide({ source: "native-navigation" }),
     "ignore-native-route"
