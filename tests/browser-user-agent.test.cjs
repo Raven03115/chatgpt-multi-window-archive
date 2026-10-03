@@ -81,6 +81,9 @@ test("only observed automations collection, detail GET, and item POST requests r
       "https://chatgpt.com/backend-api/automation/fixture-item-id?source=scheduled"
     ),
     requestDetails(
+      "https://chatgpt.com/backend-api/automation/fixture-item-id/result"
+    ),
+    requestDetails(
       "https://chatgpt.com/backend-api/automations/fixture-item-id",
       { method: "POST" }
     ),
@@ -108,9 +111,6 @@ test("other backend requests and non-page requests retain the original UA", () =
     requestDetails("https://chatgpt.com/backend-api/automations-malicious"),
     requestDetails("https://chatgpt.com/backend-api/automation-malicious"),
     requestDetails("https://chatgpt.com/backend-api/automation"),
-    requestDetails(
-      "https://chatgpt.com/backend-api/automation/fixture-item-id/action"
-    ),
     requestDetails(
       "https://chatgpt.com/backend-api/automation/fixture-item-id",
       { method: "POST" }
@@ -164,6 +164,10 @@ test("supported automations matcher is limited to the observed method and route 
   )), true);
   assert.equal(isSupportedAutomationsRequest(requestDetails(
     "https://chatgpt.com/backend-api/automation/fixture-item-id/action"
+  )), true);
+  assert.equal(isSupportedAutomationsRequest(requestDetails(
+    "https://chatgpt.com/backend-api/automation/fixture-item-id/action",
+    { method: "POST" }
   )), false);
   assert.equal(isSupportedAutomationsRequest(requestDetails(
     "https://chatgpt.com/backend-api/automations/fixture-item-id/action",
