@@ -4,19 +4,16 @@
 
 此 Repository 是 Windows 上的 ChatGPT Multi Pane Electron 工具，直接載入官方 `chatgpt.com`，提供共用官方側欄與多個獨立 ChatGPT 窗格。
 
-2026-09-28 相容性修正已完成正式收尾，範圍包含：
-
-- 新版「重新命名」compact dialog 可見性／shape 判定。
-- 移除為診斷暫時加入的 pane network failure instrumentation。
-- 處理 Electron 在頁面載入期間大量 `executeJavaScript()` 呼叫造成的 `MaxListenersExceededWarning`。
+目前工作項目是 2026-10-03 Scheduled Tasks 執行結果相容性修正：Electron 版可載入排程清單與任務詳細資料，但任務執行結果顯示「無法載入任務結果」，同一任務在一般網頁版可正常顯示。
 
 ## 目前權威來源
 
 - Repository：`Raven03115/chatgpt-multi-window-archive`
 - 正式分支：`main`
-- 本輪修正來源分支：`fix/chatgpt-nested-dialog-2026-09-28`
-- 修正候選 HEAD：`c5e92cb1e6708f90a853ae4b8971cf446d589847`
-- 正式狀態：已完成驗證並合併至 `main`；後續開發以 `main` 最新 HEAD 為準。
+- 工作分支：`fix/chatgpt-nested-dialog-2026-09-28`
+- 本次工作基準：`main` HEAD `116918f48655a23858ca4877569764933ec5b7a5`
+- 工作分支已先 fast-forward 到上述 `main` 基準，再套用本次修正。
+- 尚未合併本次 Scheduled Tasks 修正到 `main`。
 
 ## 技術棧與重要版本
 
@@ -28,58 +25,59 @@
 
 ## 已完成
 
-### Rename compatibility
+### 2026-09-28 ChatGPT UI compatibility
 
-- 已確認新版 ChatGPT Rename surface 是明確的 compact dialog root，但 root 本身可為 transparent。
-- dialog detector 已改為：明確 root semantic + compact geometry + interactive content 即可判定為 `compact-confirmation`，不再要求 root 必須 opaque。
-- 已移除曾用來修改 ChatGPT DOM alpha 的 compatibility workaround。
-- 已保留 synthetic Electron regression fixture，覆蓋 420×188 transparent `role=dialog` Rename surface。
-- 使用者已人工確認一般對話與 Project 的 Rename UI 正常。
+- 新版 Rename compact dialog 已改為依 explicit dialog semantic + compact geometry + interactive content 判定，不要求 root opaque。
+- 已移除修改官方 ChatGPT dialog DOM alpha 的舊 workaround。
+- `MaxListenersExceededWarning` 已以 shared `executeJavaScript()` load gate 修正，未提高 EventEmitter listener 上限。
+- 使用者已驗收一般對話／Project Rename、pane 載入與切換正常；上一輪已合併到 `main`。
 
-### Temporary pane network diagnostics cleanup
+### 2026-10-03 Scheduled Tasks result diagnosis
 
-- 使用者先前遇到部分 pane 顯示「無法載入此 ChatGPT 對話」，後續自行恢復且重試可正常使用。
-- 因未取得可重現的 HTTP/network failure 證據，不把此事件視為已由程式修復。
-- 為調查該事件暫時加入的 pane network diagnostics 已移除；Automations request diagnostics 已恢復既有行為。
-
-### Electron listener accumulation
-
-- Electron 的 `webContents.executeJavaScript()` 在 WebContents 尚未停止載入時會等待 `did-stop-loading`；大量同時呼叫會對同一 WebContents 累積 listeners。
-- 現行修正加入 shared load gate：同一個 WebContents 在載入期間的多個 `executeJavaScript()` 呼叫共用一組 `did-stop-loading` / `destroyed` listener，停止載入後再執行原始呼叫。
-- 未提高 EventEmitter max listener 上限，也未以 suppress warning 取代 root-cause 修正。
+- 使用者實際 diagnostics 顯示：
+  - `GET automations-collection`：Electron UA 被移除，HTTP 200。
+  - `GET automation-detail-item`：Electron UA 被移除，HTTP 200。
+  - `POST automations-item`：Electron UA 被移除，HTTP 200。
+  - `GET automation-detail-action`：Electron UA 未被移除、request 不匹配，HTTP 404，且可重複重現。
+- 根據上述證據，問題定位在 Scheduled Task 執行結果使用的 `GET automation-detail-action` request policy，而非 sidebar routing、pane navigation 或整個 Scheduled Tasks 頁面載入。
+- 已新增 regression test，要求 `GET /backend-api/automation/:id/<action>` 類型的 detail-action request 移除 Electron UA。
+- 現行修正僅把 `GET automation-detail-action` 加入已觀察到的 supported request pairs；`POST automation-detail-action` 與 plural `automations-item-action` 仍維持不匹配。
+- 不擴大到所有 `/backend-api/*`，不修改 URL、method、body、cookie 或其他 headers。
 
 ## 重要決策與被取代方案
 
-- 失效：用極低 alpha 背景修改 ChatGPT dialog DOM，讓舊 detector 誤認為 opaque。
-- 現行：直接修正 dialog classification policy，不修改官方 ChatGPT dialog DOM。
-- 失效：因短暫 pane 載入異常長期保留廣泛 network diagnostics。
-- 現行：pane 載入異常目前不做 speculative fix；若再次穩定重現，再用最小、去識別化診斷定位。
-- 不採用：單純提高 `EventEmitter` max listeners 以隱藏 warning。
-- 現行：在 Electron `executeJavaScript()` 進入其內部等待前先共用 load gate。
+- 不採用：對所有 ChatGPT request 全域移除 Electron UA。
+- 現行：只針對已由 diagnostics 證實需要相容處理的 Automations method + routeKind 組合移除 Electron token。
+- 不採用：把 Scheduled Tasks 結果錯誤當成 sidebar route 或 pane navigation 問題處理。
+- 現行：依實際 request lifecycle diagnostics 定位到 `automation-detail-action`。
 
 ## 已知問題與剩餘風險
 
-- 先前 pane「無法載入此 ChatGPT 對話」事件目前不可重現，因此沒有宣稱由程式修復。
-- ChatGPT Web DOM / route 仍可能因官方改版再次變動。
-- 其他未重現問題應先依 `npm run diagnostics` 與最小 regression test 定位，不沿用本輪已失效的 speculative workaround。
+- 本次 Scheduled Tasks 修正尚未在使用者 Windows / Electron 43.1.0 環境完成 `npm run verify`。
+- 尚未人工驗收「已排程 → 任務 → 執行結果」是否恢復正常。
+- Diagnostics 只記錄去識別化 routeKind，沒有記錄 action 子路徑；目前修正因此以已觀察到的 `GET automation-detail-action` 類型為最小可驗證範圍。
+- ChatGPT Web API / DOM 仍可能因官方改版再次變動。
 
 ## 最近測試證據
 
-- 使用者回報最終候選版 `npm run verify` 全部通過。
-- 使用者實際啟動 Electron 後未再看到 `MaxListenersExceededWarning: ... did-stop-loading listeners ...`。
-- 使用者人工驗收：一般對話與 Project 的「重新命名」正常；一般 pane 開啟、切換與載入正常。
-- `webcontents-execute-javascript-load-gate` isolated unit tests：4/4 pass。
+- 2026-10-03 使用者 diagnostics：多次 `GET automation-detail-action` 皆為 `electronRemoved=false`、`requestMatched=false`、HTTP 404；相鄰的 supported Automations requests 為 HTTP 200。
+- 已先建立 regression test，再修改 production policy。
+- 本次候選版完整 `npm run verify`：尚未執行。
 
 ## 啟動與驗證方式
 
 ```powershell
 cd D:\chatgpt-multi-window
-git switch main
-git pull --ff-only origin main
+git fetch origin
+git switch --detach origin/fix/chatgpt-nested-dialog-2026-09-28
 npm run verify
 npm start
 ```
 
 ## 下一個驗收條件
 
-目前本輪修正已完成。後續若 ChatGPT Web UI 再次改版，以 `main` 最新程式碼、可重現步驟、diagnostics 與對應 regression test 為新的驗收基準。
+1. `npm run verify` 全部通過。
+2. 啟動 Electron 後進入「已排程」，打開先前失敗的任務。
+3. 任務執行結果可正常顯示，不再出現「無法載入任務結果」。
+4. 排程清單、任務詳細資料、一般 pane 與既有 Rename 功能沒有 regression。
+5. 驗收通過後，才合併本次修正至 `main`。
