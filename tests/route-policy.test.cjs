@@ -113,6 +113,10 @@ test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu navi
   );
   assert.match(
     nativeMenuBranch,
+    /reportMenuRouteCandidate\(event\.target\)/
+  );
+  assert.doesNotMatch(
+    nativeMenuBranch,
     /reportProjectActionCandidate\(event\.target\)/
   );
   assert(
