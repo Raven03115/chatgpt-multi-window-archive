@@ -1440,10 +1440,6 @@ function reportProjectActionCandidate(target) {
     return false;
   }
 
-  if (control.matches('[role="menuitem"]')) {
-    return false;
-  }
-
   const hasAnchor =
     control.matches("a[href]") ||
     Boolean(control.closest("a[href]"));
@@ -1901,7 +1897,9 @@ function handlePointerDown(event) {
   } else if (snapshot.overlayOnlyKind) {
     notifyOverlayOnlyIntent(snapshot.overlayOnlyKind);
   } else if (snapshot.nativeMenu) {
-    // Preserve native popup actions without creating Project intent.
+    reportProjectActionCandidate(event.target);
+    // Preserve the official menu click; any resulting workspace route
+    // may consume the short-lived intent in the main process.
   } else if (
     reportProjectActionCandidate(event.target)
   ) {
