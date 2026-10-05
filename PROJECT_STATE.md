@@ -10,10 +10,10 @@
 
 - Repository：`Raven03115/chatgpt-multi-window-archive`
 - 正式分支：`main`
-- 正式基準 HEAD：`32f33976a98b2fa195f8a7e23a71b313617d518e`
-- 工作分支：`fix/chatgpt-nested-dialog-2026-09-28`
-- 工作分支已先 fast-forward 到上述 `main` 基準，再套用本次 Explore 修正。
-- 本次修正尚未合併回 `main`。
+- 正式分支最新已驗收功能來源：`main`
+- Explore 修正來源分支：`fix/chatgpt-nested-dialog-2026-09-28`
+- Explore 修正程式 HEAD：`d9b23fad4392c392d2fb7409813a4fd65a15df34`
+- 2026-10-05 使用者已人工驗收探索功能恢復正常，並已將修正 fast-forward 合併至 `main`。
 
 ## 技術棧與重要版本
 
@@ -48,7 +48,7 @@
 - 同一份 diagnostics 中，其他已有 one-time intent 的 `unknown-workspace` route 可正常被 consume、`pane-load-url` 並 `route-forwarded`。
 - Root cause：探索項目是 native `role=menuitem` SPA action；現行 preload 保留 native menu click，但沒有對後續 workspace navigation 提供可驗證的一次性路由授權。
 
-### 2026-10-05 Explore candidate redesign after regression
+### 2026-10-05 Explore routing compatibility
 
 - 第一版候選修正曾把所有 `menuitem` 直接納入既有 Project action intent。
 - 使用者執行完整 verify 後，offline Electron fixture 正確失敗：`ordinary menuitem emitted an intent`。
@@ -74,9 +74,9 @@
 
 ## 已知問題與剩餘風險
 
-- 修訂後 Explore 候選版尚未在使用者 Windows / Electron 43.1.0 環境重新完成完整 `npm run verify`。
-- 尚未人工驗收「探索 → 地圖／圖像／GPT／網站」是否可正常載入 active pane。
-- 普通 native menu item 會建立短效 menu route candidate，但只有後續 `unknown-workspace` navigation 才能 consume；仍需 verify + UI 驗收確認 account menu、conversation/Project context menu 無 regression。
+- 使用者已人工驗收「探索」功能恢復正常，可正常開啟探索項目並使用。
+- 使用者未另外貼出最終修正後完整 `148/148` 終端摘要，因此不可把完整 automated verify 記錄描述成已取得；已知上一輪 offline Electron fixture 已通過，後續兩個 CRLF static-test false failures亦已修正。
+- 普通 native menu item 仍使用獨立短效 menu route candidate，只有後續 `unknown-workspace` navigation 可 consume；Project intent 隔離保留。
 - Rename dialog 功能已正常，但開啟 modal 時背景 pane 被暫時收成 0×0、呈現大片黑色；這是已知 UI polish 項目，尚未處理，不能與 Explore 修復混在同一修改中。
 - ChatGPT Web API / DOM 仍可能因官方改版再次變動。
 
@@ -87,7 +87,7 @@
 - 修訂版第二次 verify：offline Electron fixture 已通過，ordinary menu regression 已消失；148 個測試中 146 pass、2 fail。
 - 剩餘 2 個 failure 都位於 `tests/route-policy.test.cjs` 的 static source slicing：測試用 LF-only 字串尋找 branch 邊界，但 Windows 讀取 source 時保留 CRLF，`indexOf(...\n...)` 找不到邊界而使 slice 延伸到後續 Project branch。Production code 與 Electron fixture 並未因此失敗。
 - 已把這兩個 static assertions 改為 line-ending-agnostic regex，仍要求 native menu branch 內必須呼叫 `reportMenuRouteCandidate` 且不得呼叫 `reportProjectActionCandidate`；沒有刪除或弱化檢查。
-- 本環境無法代替使用者 Windows 環境執行完整 `npm run verify`；修正後完整驗證仍待重新執行。
+- 使用者已完成最終 UI 驗收並回報探索功能可正常使用；最終完整 `npm run verify` 終端摘要未在對話中提供。
 
 ## 啟動與驗證方式
 
@@ -102,9 +102,4 @@ npm start
 
 ## 下一個驗收條件
 
-1. `npm run verify` 全部通過，尤其 offline Electron fixture 不再出現 `ordinary menuitem emitted an intent`。
-2. 啟動 Electron 後打開側欄「探索」。
-3. 至少點選一個先前失敗的探索項目，內容正確載入目前 active pane。
-4. 再最小確認一個一般 account / conversation / Project 的 native menu 操作仍正常，不發生非預期 pane 導航。
-5. 既有 Rename、Scheduled Tasks、一般 pane routing 無 regression。
-6. 驗收通過後，才合併本次修正至 `main`。
+2026-10-05 Explore 功能性問題已由使用者人工驗收並合併至 `main`。下一個已知待處理項目是 Rename modal 開啟時背景 pane 被收成 0×0 而呈現大片黑色的 UI polish；該項目必須獨立處理，不得與已驗證的 Explore routing 邏輯混改。
