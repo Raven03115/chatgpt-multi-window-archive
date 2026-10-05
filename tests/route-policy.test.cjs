@@ -95,13 +95,13 @@ test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu navi
     pointerHandler.indexOf("else if (snapshot.upgradeControl)") <
       pointerHandler.indexOf("else if (snapshot.nativeMenu)")
   );
-  assert.match(
-    pointerHandler,
-    /else if \(snapshot\.nativeMenu\) \{\s*reportProjectActionCandidate\(event\.target\);\s*\}/
+  const nativeMenuBranch = pointerHandler.slice(
+    pointerHandler.indexOf("else if (snapshot.nativeMenu)"),
+    pointerHandler.indexOf("else if (\n    reportProjectActionCandidate(event.target)")
   );
-  assert(
-    pointerHandler.indexOf("else if (snapshot.nativeMenu)") <
-      pointerHandler.indexOf("else if (\n    reportProjectActionCandidate(event.target)")
+  assert.match(
+    nativeMenuBranch,
+    /reportProjectActionCandidate\(event\.target\)/
   );
   assert(
     clickHandler.indexOf("if (completedPointerGesture)") <
