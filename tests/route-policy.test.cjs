@@ -36,6 +36,23 @@ function createMenuRouteIntent(overrides = {}) {
   };
 }
 
+function getNativeMenuPointerBranch(preloadSource) {
+  const pointerHandler = preloadSource.slice(
+    preloadSource.indexOf("function handlePointerDown"),
+    preloadSource.indexOf("function handleClick")
+  );
+  const match = pointerHandler.match(
+    /else if \(snapshot\.nativeMenu\) \{([\s\S]*?)\}\s*else if \(\s*reportProjectActionCandidate\(event\.target\)/
+  );
+
+  assert.ok(
+    match,
+    "native menu pointer branch was not found"
+  );
+
+  return match[1];
+}
+
 test("a role-button resolved from an SVG or path target is an eligible candidate", () => {
   const result = decideProjectActionCandidate({
     phase: "pointerdown",
@@ -107,10 +124,8 @@ test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu navi
     pointerHandler.indexOf("else if (snapshot.upgradeControl)") <
       pointerHandler.indexOf("else if (snapshot.nativeMenu)")
   );
-  const nativeMenuBranch = pointerHandler.slice(
-    pointerHandler.indexOf("else if (snapshot.nativeMenu)"),
-    pointerHandler.indexOf("else if (\n    reportProjectActionCandidate(event.target)")
-  );
+  const nativeMenuBranch =
+    getNativeMenuPointerBranch(preloadSource);
   assert.match(
     nativeMenuBranch,
     /reportMenuRouteCandidate\(event\.target\)/
@@ -162,10 +177,8 @@ test("native menu navigation uses a dedicated IPC channel instead of Project int
     /ipcMain\.on\(\s*"chatgpt-sidebar-menu-route-candidate"/
   );
 
-  const nativeMenuBranch = preloadSource.slice(
-    preloadSource.indexOf("else if (snapshot.nativeMenu)"),
-    preloadSource.indexOf("else if (\n    reportProjectActionCandidate(event.target)")
-  );
+  const nativeMenuBranch =
+    getNativeMenuPointerBranch(preloadSource);
 
   assert.match(
     nativeMenuBranch,
