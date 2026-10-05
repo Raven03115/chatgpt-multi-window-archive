@@ -183,14 +183,14 @@ test("only explicit external fullscreen reveals main workspace and normal mode h
   assert.equal(normal.mainWorkspaceVisible, false);
 });
 
-test("a native menu action never routes or creates Project intent", () => {
+test("a native workspace menu action may create a short-lived navigation intent without routing directly", () => {
   const decision = decideOverlayControl(classifyOverlayControl({
     actionableKind: "menuitem"
   }));
 
   assert.deepEqual(decision, {
     route: false,
-    projectIntent: false
+    projectIntent: true
   });
 });
 
