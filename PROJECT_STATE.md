@@ -4,15 +4,16 @@
 
 此 Repository 是 Windows 上的 ChatGPT Multi Pane Electron 工具，直接載入官方 `chatgpt.com`，提供共用官方側欄與多個獨立 ChatGPT 窗格。
 
-2026-10-03 Scheduled Tasks 執行結果相容性問題已完成修復並合併至 `main`：Electron 版原本可載入排程清單與任務詳細資料，但任務執行結果顯示「無法載入任務結果」，同一任務在一般網頁版可正常顯示。
+目前工作項目是 2026-10-05 側欄「探索」選單路由相容性修正：探索 popup 可正常開啟，但點選其中的地圖、圖像、GPT、網站等項目後沒有任何反應；一般 ChatGPT 網頁端可正常使用。
 
 ## 目前權威來源
 
 - Repository：`Raven03115/chatgpt-multi-window-archive`
 - 正式分支：`main`
-- 本次修正來源分支：`fix/chatgpt-nested-dialog-2026-09-28`
-- 本次修正候選 HEAD：`1a58e75c681762434bdf3695e427be65460efe23`
-- 正式狀態：Scheduled Tasks 執行結果修正已由使用者人工驗收並合併至 `main`；後續開發以 `main` 最新 HEAD 為準。
+- 正式基準 HEAD：`32f33976a98b2fa195f8a7e23a71b313617d518e`
+- 工作分支：`fix/chatgpt-nested-dialog-2026-09-28`
+- 工作分支已先 fast-forward 到上述 `main` 基準，再套用本次 Explore 修正。
+- 本次修正尚未合併回 `main`。
 
 ## 技術棧與重要版本
 
@@ -33,46 +34,64 @@
 
 ### 2026-10-03 Scheduled Tasks result compatibility
 
-- 使用者 diagnostics 證實：
-  - `GET automations-collection`：Electron UA 被移除，HTTP 200。
-  - `GET automation-detail-item`：Electron UA 被移除，HTTP 200。
-  - `POST automations-item`：Electron UA 被移除，HTTP 200。
-  - `GET automation-detail-action`：Electron UA 原先未被移除、request 不匹配，HTTP 404，且可重複重現。
-- Root cause 定位在 Scheduled Task 執行結果使用的 `GET automation-detail-action` request policy，而非 sidebar routing、pane navigation 或整個 Scheduled Tasks 頁面載入。
-- 已新增 regression test，要求 `GET /backend-api/automation/:id/<action>` 類型的 detail-action request 移除 Electron UA。
-- Production policy 只新增 `GET automation-detail-action`；`POST automation-detail-action` 與 plural `automations-item-action` 仍維持不匹配。
-- 不擴大到所有 `/backend-api/*`，不修改 URL、method、body、cookie 或其他 headers。
-- 使用者已人工驗收「已排程 → 任務 → 執行結果」恢復正常，不再出現「無法載入任務結果」。
+- 使用者 diagnostics 證實 `GET automation-detail-action` 原先未移除 Electron UA、request 不匹配且 HTTP 404；相鄰 supported Automations requests 為 HTTP 200。
+- 已新增 regression test，並只把 `GET automation-detail-action` 加入已觀察到的 supported request pairs。
+- 使用者已人工驗收 Scheduled Tasks 任務執行結果恢復正常；已合併到 `main`。
+
+### 2026-10-05 Explore menu routing diagnosis and candidate fix
+
+- 使用者 diagnostics 可重複看到：
+  - 探索 menu trigger 正常：`menu-trigger-detected`、`popup-detected`。
+  - 點選探索 menu item 後發生 `native-route-ignored`。
+  - routeKind 為 `unknown-workspace`。
+  - reason 為 `native-route-without-intent`。
+- 同一份 diagnostics 中，其他非 anchor 控制項建立 one-time intent 後，`unknown-workspace` route 可正常被 consume、`pane-load-url` 並 `route-forwarded`。
+- Root cause：preload 原先把 `role=menuitem` 一律視為 native menu action，不建立短效 workspace navigation intent；主程序因此拒絕後續 native SPA workspace route。
+- 已先建立 regression tests，再修改 production policy。
+- 現行候選修正：
+  - `menuitem` 可成為 pointerdown action candidate。
+  - overlay control policy 將 `menu-action` 設為可建立短效 project/workspace intent，但不直接 route。
+  - preload 保留 ChatGPT 原生 menu click，同時對 native menu action送出 candidate；真正是否 forward 仍由後續有效 ChatGPT workspace route、active pane、intent generation 與 1 秒 lifetime 驗證。
+  - Settings、Search、dialog、anchor、backdrop、close、external control 仍不得建立 intent。
+  - menu trigger 本身仍只負責開 popup，不建立 route intent。
 
 ## 重要決策與被取代方案
 
-- 不採用：對所有 ChatGPT request 全域移除 Electron UA。
-- 現行：只針對已由 diagnostics 證實需要相容處理的 Automations method + routeKind 組合移除 Electron token。
-- 不採用：把 Scheduled Tasks 結果錯誤當成 sidebar route 或 pane navigation 問題處理。
-- 現行：依實際 request lifecycle diagnostics 定位到 `automation-detail-action`。
+- 不採用：直接攔截探索項目 click 並自行硬編碼目的 URL。
+- 現行：保留 ChatGPT 原生 click / SPA routing，只補齊短效 intent，讓既有 route-policy 決定是否轉送到 active pane。
+- 不採用：放寬所有 native navigation，使無 intent 的 sidebar route 都能進 pane。
+- 現行：仍要求有效 one-time intent，避免背景或非使用者操作的 native navigation 被誤轉送。
+- 不採用：為此次 Explore 問題修改 Scheduled Tasks、Rename detector 或 pane loadURL 邏輯。
 
 ## 已知問題與剩餘風險
 
+- 本次 Explore 候選版尚未在使用者 Windows / Electron 43.1.0 環境完成完整 `npm run verify`。
+- 尚未人工驗收「探索 → 地圖／圖像／GPT／網站」是否可正常載入 active pane。
+- native menu action 現在可建立最長 1 秒的 one-time intent；雖然只有後續有效 workspace route 才能 consume，仍需 UI 驗收確認一般 conversation / Project row context menu 沒有 regression。
+- Rename dialog 功能已正常，但開啟 modal 時背景 pane 被暫時收成 0×0、呈現大片黑色；這是已知 UI polish 項目，尚未處理，不能與 Explore 修復混在同一修改中。
 - ChatGPT Web API / DOM 仍可能因官方改版再次變動。
-- Diagnostics 只記錄去識別化 routeKind，不記 action 子路徑；若未來 action 類型再分化，需重新以 diagnostics + regression test 定位。
-- 本次對話未取得完整 `npm run verify` 終端輸出作為可引用證據；若後續需要重新發布或做高風險變更，應重新執行完整 `npm run verify`。
 
 ## 最近測試證據
 
-- 2026-10-03 使用者 diagnostics：多次 `GET automation-detail-action` 皆為 `electronRemoved=false`、`requestMatched=false`、HTTP 404；相鄰 supported Automations requests 為 HTTP 200。
-- 已先建立 regression test，再修改 production policy。
-- 使用者人工驗收：Scheduled Tasks 任務執行結果已恢復正常。
+- 2026-10-05 使用者 diagnostics：Explore 選單點擊後可重複重現 `unknown-workspace + native-route-without-intent`；其他有 one-time intent 的同類 route 可正常 forward。
+- 已先提交 route-policy / overlay-policy regression tests，再修改 production 程式。
+- 本環境無法連線 GitHub clone repository，無法代替使用者 Windows 環境執行完整 `npm run verify`；完整驗證仍待執行。
 
 ## 啟動與驗證方式
 
 ```powershell
 cd D:\chatgpt-multi-window
-git switch main
-git pull --ff-only origin main
+git fetch origin
+git switch --detach origin/fix/chatgpt-nested-dialog-2026-09-28
 npm run verify
 npm start
 ```
 
 ## 下一個驗收條件
 
-目前 2026-10-03 Scheduled Tasks 執行結果問題已完成修復並進入 `main`。後續若 ChatGPT Web API 或 UI 再次改版，以 `main` 最新程式碼、可重現步驟、diagnostics 與對應 regression test 為新的驗收基準。
+1. `npm run verify` 全部通過。
+2. 啟動 Electron 後打開側欄「探索」。
+3. 至少點選一個先前失敗的探索項目，內容正確載入目前 active pane。
+4. 再最小確認一個 conversation / Project row 的「…」選單仍正常，不發生非預期 pane 導航。
+5. 既有 Rename、Scheduled Tasks、一般 pane routing 無 regression。
+6. 驗收通過後，才合併本次修正至 `main`。
