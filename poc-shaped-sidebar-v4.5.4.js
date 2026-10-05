@@ -13,8 +13,10 @@ const fs = require("fs");
 const path = require("path");
 
 const {
+  MENU_ROUTE_INTENT_MAX_AGE_MS,
   PROJECT_ACTION_INTENT_MAX_AGE_MS,
   classifyRoute,
+  decideMenuRouteCandidate,
   decideProjectActionCandidate,
   decideSidebarRouting
 } = require("./lib/route-policy.cjs");
@@ -230,6 +232,9 @@ let lastSkippedOverlayShapeSignature = "";
 let projectActionIntent = null;
 let projectActionIntentGeneration = 0;
 let projectActionIntentTimer = null;
+let menuRouteIntent = null;
+let menuRouteIntentGeneration = 0;
+let menuRouteIntentTimer = null;
 
 function getConfigPath() {
   return path.join(
@@ -482,6 +487,7 @@ function clearProjectActionIntent(
 
 function createProjectActionIntent() {
   clearProjectActionIntent("replaced-by-new-intent");
+  clearMenuRouteIntent("project-action-intent-created");
 
   sidebarRouteForwardSuppressionUntil = 0;
 
@@ -538,6 +544,104 @@ function consumeProjectActionIntent(routeKind) {
     source: "project-action-intent",
     action: "consume-project-intent",
     reason: "matching-native-project-route"
+  });
+
+  return consumedIntent;
+}
+
+function clearMenuRouteIntent(
+  reason,
+  expectedGeneration = null
+) {
+  if (
+    !menuRouteIntent ||
+    (
+      expectedGeneration !== null &&
+      menuRouteIntent.generation !== expectedGeneration
+    )
+  ) {
+    return false;
+  }
+
+  const clearedIntent = menuRouteIntent;
+  menuRouteIntent = null;
+
+  if (menuRouteIntentTimer) {
+    clearTimeout(menuRouteIntentTimer);
+    menuRouteIntentTimer = null;
+  }
+
+  recordIntegrationEvent({
+    event: "menu-route-intent-cleared",
+    pane: clearedIntent.paneIndex + 1,
+    routeKind: "unknown-workspace",
+    source: "menu-route-intent",
+    action: "clear-menu-route-intent",
+    reason
+  });
+
+  return true;
+}
+
+function createMenuRouteIntent() {
+  clearMenuRouteIntent("replaced-by-new-intent");
+  clearProjectActionIntent("menu-route-intent-created");
+
+  sidebarRouteForwardSuppressionUntil = 0;
+
+  menuRouteIntentGeneration += 1;
+
+  const generation = menuRouteIntentGeneration;
+  const paneIndex = activePaneIndex;
+
+  menuRouteIntent = {
+    paneIndex,
+    generation,
+    createdAt: performance.now(),
+    consumed: false
+  };
+
+  menuRouteIntentTimer = setTimeout(() => {
+    clearMenuRouteIntent(
+      "intent-timeout",
+      generation
+    );
+  }, MENU_ROUTE_INTENT_MAX_AGE_MS);
+
+  recordIntegrationEvent({
+    event: "menu-route-intent-created",
+    pane: paneIndex + 1,
+    routeKind: "unknown-workspace",
+    source: "menu-route-intent",
+    action: "create-menu-route-intent",
+    reason: "native-menu-pointerdown"
+  });
+}
+
+function consumeMenuRouteIntent(routeKind) {
+  if (!menuRouteIntent) {
+    return null;
+  }
+
+  const consumedIntent = {
+    ...menuRouteIntent,
+    consumed: true
+  };
+
+  menuRouteIntent = null;
+
+  if (menuRouteIntentTimer) {
+    clearTimeout(menuRouteIntentTimer);
+    menuRouteIntentTimer = null;
+  }
+
+  recordIntegrationEvent({
+    event: "menu-route-intent-consumed",
+    pane: consumedIntent.paneIndex + 1,
+    routeKind,
+    source: "menu-route-intent",
+    action: "consume-menu-route-intent",
+    reason: "matching-native-menu-workspace-route"
   });
 
   return consumedIntent;
@@ -2112,6 +2216,7 @@ function handleSidebarNavigation(url) {
 
   if (isExternalAccountRouteUrl(url)) {
     clearProjectActionIntent("external-route-opened");
+    clearMenuRouteIntent("external-route-opened");
 
     recordIntegrationEvent({
       event: "sidebar-route-handled",
@@ -2126,6 +2231,7 @@ function handleSidebarNavigation(url) {
 
   if (isOverlayOnlyRouteUrl(url)) {
     clearProjectActionIntent("overlay-only-route-opened");
+    clearMenuRouteIntent("overlay-only-route-opened");
 
     recordIntegrationEvent({
       event: "sidebar-route-handled",
@@ -2148,9 +2254,12 @@ function handleSidebarNavigation(url) {
           ? "dialog"
           : "closed",
       projectActionIntent,
+      menuRouteIntent,
       activePaneIndex,
       currentProjectIntentGeneration:
         projectActionIntentGeneration,
+      currentMenuRouteIntentGeneration:
+        menuRouteIntentGeneration,
       now: performance.now(),
       suppressionActive:
         shouldSuppressSidebarRouteForwarding(),
@@ -2160,6 +2269,8 @@ function handleSidebarNavigation(url) {
     let nativeRouteReason = decision.reason;
 
     if (decision.action === "ignore-duplicate") {
+      clearMenuRouteIntent("duplicate-route-suppressed");
+
       recordIntegrationEvent({
         event: "duplicate-suppressed",
         pane: activePaneIndex + 1,
@@ -2174,7 +2285,9 @@ function handleSidebarNavigation(url) {
 
     if (decision.action === "forward-to-pane") {
       const consumedIntent =
-        consumeProjectActionIntent(routeKind);
+        decision.reason === "explicit-menu-workspace-intent"
+          ? consumeMenuRouteIntent(routeKind)
+          : consumeProjectActionIntent(routeKind);
 
       if (
         consumedIntent &&
@@ -2196,6 +2309,8 @@ function handleSidebarNavigation(url) {
       nativeRouteReason =
         "workspace-forwarding-unavailable";
     }
+
+    clearMenuRouteIntent("nonmatching-native-route");
 
     recordIntegrationEvent({
       event: "native-route-ignored",
@@ -2294,6 +2409,7 @@ function applyOverlayRuntimeEvent(event, reason) {
 function beginOverlayIntentPending() {
   nativeDialogClosePending = false;
   clearProjectActionIntent("overlay-intent-pending");
+  clearMenuRouteIntent("overlay-intent-pending");
   clearOverlayPendingTimer();
   applyOverlayRuntimeEvent(
     { type: "overlay-intent" },
@@ -2521,6 +2637,7 @@ function dismissSidebarTransientUi() {
   popupRects = [];
   lockedDialogRect = null;
   nativeDialogClosePending = false;
+  clearMenuRouteIntent("sidebar-transient-ui-dismissed");
   clearOverlayPendingTimer();
   applyOverlayRuntimeEvent(
     { type: "close" },
@@ -3879,6 +3996,7 @@ function createWorkspaceWindow() {
   workspaceWindow.on("closed", () => {
     clearPaneCloseNotice();
     clearProjectActionIntent("workspace-window-closed");
+    clearMenuRouteIntent("workspace-window-closed");
 
     if (isUsableWindow(sidebarOverlayWindow)) {
       sidebarOverlayWindow.destroy();
@@ -4238,6 +4356,53 @@ ipcMain.on(
 );
 
 ipcMain.on(
+  "chatgpt-sidebar-menu-route-candidate",
+  (event, candidate) => {
+    if (
+      !isUsableWindow(sidebarOverlayWindow) ||
+      event.sender.id !==
+        sidebarOverlayWindow.webContents.id
+    ) {
+      return;
+    }
+
+    const overlayState =
+      overlayOnlyUiActive ||
+      Boolean(lockedDialogRect) ||
+      fullscreenOverlayMode
+        ? "dialog"
+        : candidate?.overlayState;
+    const decision = decideMenuRouteCandidate({
+      phase: candidate?.phase,
+      controlKind: candidate?.controlKind,
+      insideDialog: Boolean(candidate?.insideDialog),
+      overlayState,
+      overlayControl: Boolean(candidate?.overlayControl),
+      closeControl: Boolean(candidate?.closeControl),
+      externalControl: Boolean(candidate?.externalControl),
+      backdropControl: Boolean(candidate?.backdropControl)
+    });
+
+    recordIntegrationEvent({
+      event: "menu-route-candidate",
+      pane: activePaneIndex + 1,
+      source: "pointerdown",
+      action: decision.action,
+      reason: decision.reason
+    });
+
+    if (
+      decision.action !== "create-menu-route-intent" ||
+      !isUsableView(getActivePaneView())
+    ) {
+      return;
+    }
+
+    createMenuRouteIntent();
+  }
+);
+
+ipcMain.on(
   "chatgpt-sidebar-project-action-candidate",
   (event, candidate) => {
     if (
@@ -4328,6 +4493,7 @@ ipcMain.on(
     }
 
     clearProjectActionIntent("dialog-close-intent");
+    clearMenuRouteIntent("dialog-close-intent");
 
     if (
       overlayOnlyIntentKind === "settings" &&
@@ -4398,6 +4564,7 @@ ipcMain.on(
     }
 
     clearProjectActionIntent("anchor-route-intent");
+    clearMenuRouteIntent("anchor-route-intent");
 
     const routeKind = getDiagnosticRouteKind(url);
 
@@ -4480,6 +4647,7 @@ ipcMain.on(
     }
 
     clearProjectActionIntent("external-route-intent");
+    clearMenuRouteIntent("external-route-intent");
 
     openFullscreenAccountRoute(url);
   }
@@ -4499,6 +4667,7 @@ ipcMain.on(
     }
 
     clearProjectActionIntent("overlay-only-intent");
+    clearMenuRouteIntent("overlay-only-intent");
 
     const kind = intent?.kind === "settings"
       ? "settings"
@@ -4577,6 +4746,7 @@ ipcMain.on(
     }
 
     clearProjectActionIntent("fullscreen-overlay-opened");
+    clearMenuRouteIntent("fullscreen-overlay-opened");
 
     setFullscreenOverlayMode(true);
   }
@@ -4621,6 +4791,7 @@ app.on("will-quit", () => {
   paneContextToastUserInteractionObserved = false;
   clearPaneCloseNotice();
   clearProjectActionIntent("app-will-quit");
+  clearMenuRouteIntent("app-will-quit");
   clearOverlayPendingTimer();
   clearFullscreenCloseTimer();
   saveOpenPaneUrls();
@@ -4661,6 +4832,10 @@ app.on("will-quit", () => {
 
   ipcMain.removeAllListeners(
     "chatgpt-sidebar-project-action-candidate"
+  );
+
+  ipcMain.removeAllListeners(
+    "chatgpt-sidebar-menu-route-candidate"
   );
 
   ipcMain.removeAllListeners(
