@@ -1440,6 +1440,10 @@ function reportProjectActionCandidate(target) {
     return false;
   }
 
+  if (control.matches('[role="menuitem"]')) {
+    return false;
+  }
+
   const hasAnchor =
     control.matches("a[href]") ||
     Boolean(control.closest("a[href]"));
@@ -1470,6 +1474,49 @@ function reportProjectActionCandidate(target) {
         isLargeBackdropLikeControl(control)
     }
   );
+
+  return true;
+}
+
+function reportMenuRouteCandidate(target) {
+  const control = getControlElement(target);
+
+  if (
+    !control ||
+    !control.matches('[role="menuitem"]') ||
+    getControlKind(control) !== "menuitem"
+  ) {
+    return false;
+  }
+
+  const insideDialog = Boolean(
+    control.closest(DIALOG_ANCESTOR_SELECTOR)
+  );
+
+  ipcRenderer.send(
+    "chatgpt-sidebar-menu-route-candidate",
+    {
+      phase: "pointerdown",
+      controlKind: "menuitem",
+      insideDialog,
+      overlayState: insideDialog
+        ? "dialog"
+        : "closed",
+      overlayControl:
+        isOverlayOnlyControl(control),
+      closeControl: isCloseControl(control),
+      externalControl: isUpgradeControl(control),
+      backdropControl:
+        isLargeBackdropLikeControl(control)
+    }
+  );
+
+  reportDiagnostic({
+    event: "menu-route-candidate",
+    controlKind: "menuitem",
+    action: "candidate",
+    reason: "native-menu-pointerdown"
+  });
 
   return true;
 }
@@ -1897,9 +1944,9 @@ function handlePointerDown(event) {
   } else if (snapshot.overlayOnlyKind) {
     notifyOverlayOnlyIntent(snapshot.overlayOnlyKind);
   } else if (snapshot.nativeMenu) {
-    reportProjectActionCandidate(event.target);
-    // Preserve the official menu click; any resulting workspace route
-    // may consume the short-lived intent in the main process.
+    reportMenuRouteCandidate(event.target);
+    // Preserve the official menu click. A dedicated, short-lived menu
+    // route candidate may authorize only a following workspace route.
   } else if (
     reportProjectActionCandidate(event.target)
   ) {
