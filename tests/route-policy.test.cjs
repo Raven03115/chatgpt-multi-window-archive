@@ -135,6 +135,48 @@ test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu navi
   );
 });
 
+test("native menu navigation uses a dedicated IPC channel instead of Project intent", () => {
+  const preloadSource = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "sidebar-shape-preload-v4.5.4.js"
+    ),
+    "utf8"
+  );
+  const mainSource = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "poc-shaped-sidebar-v4.5.4.js"
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    preloadSource,
+    /ipcRenderer\.send\(\s*"chatgpt-sidebar-menu-route-candidate"/
+  );
+  assert.match(
+    mainSource,
+    /ipcMain\.on\(\s*"chatgpt-sidebar-menu-route-candidate"/
+  );
+
+  const nativeMenuBranch = preloadSource.slice(
+    preloadSource.indexOf("else if (snapshot.nativeMenu)"),
+    preloadSource.indexOf("else if (\n    reportProjectActionCandidate(event.target)")
+  );
+
+  assert.match(
+    nativeMenuBranch,
+    /reportMenuRouteCandidate\(event\.target\)/
+  );
+  assert.doesNotMatch(
+    nativeMenuBranch,
+    /reportProjectActionCandidate\(event\.target\)/
+  );
+});
+
 test("pointerdown creates a candidate while its following click never clears it", () => {
   const input = {
     controlKind: "button",
