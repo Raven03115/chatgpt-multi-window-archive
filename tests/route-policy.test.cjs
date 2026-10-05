@@ -7,8 +7,10 @@ const assert = require("node:assert/strict");
 
 const {
   classifyRoute,
+  decideMenuRouteCandidate,
   decideProjectActionCandidate,
   decideSidebarRouting,
+  isMenuRouteIntentValid,
   isProjectActionIntentValid
 } = require("../lib/route-policy.cjs");
 
@@ -18,6 +20,16 @@ function createProjectIntent(overrides = {}) {
   return {
     paneIndex: 2,
     generation: 7,
+    createdAt: TEST_NOW - 100,
+    consumed: false,
+    ...overrides
+  };
+}
+
+function createMenuRouteIntent(overrides = {}) {
+  return {
+    paneIndex: 2,
+    generation: 11,
     createdAt: TEST_NOW - 100,
     consumed: false,
     ...overrides
@@ -144,7 +156,7 @@ test("pointerdown creates a candidate while its following click never clears it"
   assert.notEqual(clickResult.action, "clear-project-intent");
 });
 
-test("a native workspace menuitem is an eligible action candidate", () => {
+test("a native menuitem is not a Project action candidate", () => {
   assertAction(decideProjectActionCandidate({
     phase: "pointerdown",
     controlKind: "menuitem",
@@ -155,7 +167,51 @@ test("a native workspace menuitem is an eligible action candidate", () => {
     closeControl: false,
     externalControl: false,
     backdropControl: false
-  }), "create-project-intent");
+  }), "ignore-control");
+});
+
+test("a native menuitem may create a dedicated menu route candidate", () => {
+  assertAction(decideMenuRouteCandidate({
+    phase: "pointerdown",
+    controlKind: "menuitem",
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  }), "create-menu-route-intent");
+});
+
+test("dialog, overlay, close, external, and backdrop menuitems never create menu route candidates", () => {
+  const base = {
+    phase: "pointerdown",
+    controlKind: "menuitem",
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  };
+
+  for (const excluded of [
+    { insideDialog: true },
+    { overlayState: "settings" },
+    { overlayState: "search" },
+    { overlayControl: true },
+    { closeControl: true },
+    { externalControl: true },
+    { backdropControl: true }
+  ]) {
+    assertAction(
+      decideMenuRouteCandidate({
+        ...base,
+        ...excluded
+      }),
+      "ignore-control"
+    );
+  }
 });
 
 test("Settings, dialogs, anchors, backdrops, close, and external controls never create candidates", () => {
@@ -270,31 +326,87 @@ test("native Project workspace without explicit intent is ignored", () => {
   );
 });
 
-test("Explore-style menuitem intent forwards an unknown workspace route", () => {
-  const candidate = decideProjectActionCandidate({
-    phase: "pointerdown",
-    controlKind: "menuitem",
-    hasAnchor: false,
-    insideDialog: false,
-    overlayState: "closed",
-    overlayControl: false,
-    closeControl: false,
-    externalControl: false,
-    backdropControl: false
-  });
-
-  assertAction(candidate, "create-project-intent");
-
+test("Explore-style menu route intent forwards only an unknown workspace route", () => {
   assertAction(
     decide({
       routeKind: "unknown-workspace",
       source: "native-navigation",
-      projectActionIntent: createProjectIntent(),
+      menuRouteIntent: createMenuRouteIntent(),
       activePaneIndex: 2,
-      currentProjectIntentGeneration: 7,
+      currentMenuRouteIntentGeneration: 11,
       now: TEST_NOW
     }),
     "forward-to-pane"
+  );
+
+  for (const routeKind of [
+    "conversation",
+    "project-workspace",
+    "project-conversation"
+  ]) {
+    assertAction(
+      decide({
+        routeKind,
+        source: "native-navigation",
+        menuRouteIntent: createMenuRouteIntent(),
+        activePaneIndex: 2,
+        currentMenuRouteIntentGeneration: 11,
+        now: TEST_NOW
+      }),
+      "ignore-native-route"
+    );
+  }
+});
+
+test("menu route intent is valid only for its pane, generation, lifetime, and unused state", () => {
+  assert.equal(
+    isMenuRouteIntentValid(
+      createMenuRouteIntent(),
+      {
+        activePaneIndex: 2,
+        currentGeneration: 11,
+        now: TEST_NOW
+      }
+    ),
+    true
+  );
+
+  for (const invalidState of [
+    {
+      activePaneIndex: 1,
+      currentGeneration: 11,
+      now: TEST_NOW
+    },
+    {
+      activePaneIndex: 2,
+      currentGeneration: 12,
+      now: TEST_NOW
+    },
+    {
+      activePaneIndex: 2,
+      currentGeneration: 11,
+      now: TEST_NOW + 1_001
+    }
+  ]) {
+    assert.equal(
+      isMenuRouteIntentValid(
+        createMenuRouteIntent(),
+        invalidState
+      ),
+      false
+    );
+  }
+
+  assert.equal(
+    isMenuRouteIntentValid(
+      createMenuRouteIntent({ consumed: true }),
+      {
+        activePaneIndex: 2,
+        currentGeneration: 11,
+        now: TEST_NOW
+      }
+    ),
+    false
   );
 });
 
