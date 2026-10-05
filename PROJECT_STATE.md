@@ -84,8 +84,10 @@
 
 - 2026-10-05 使用者 diagnostics：Explore 選單點擊後可重複重現 `unknown-workspace + native-route-without-intent`；其他有 one-time intent 的同類 route 可正常 forward。
 - 第一版 Explore 修正：使用者完整 verify 回報 offline Electron fixture failure `ordinary menuitem emitted an intent`，已據此撤銷「menuitem = Project intent」設計。
-- 修訂版已補 route-policy / preload static regression coverage，並恢復原本 ordinary menu / overlay Project-intent 隔離測試。
-- 本環境無法解析 GitHub host，因此無法代替使用者 Windows 環境執行完整 `npm run verify`；完整驗證仍待執行。
+- 修訂版第二次 verify：offline Electron fixture 已通過，ordinary menu regression 已消失；148 個測試中 146 pass、2 fail。
+- 剩餘 2 個 failure 都位於 `tests/route-policy.test.cjs` 的 static source slicing：測試用 LF-only 字串尋找 branch 邊界，但 Windows 讀取 source 時保留 CRLF，`indexOf(...\n...)` 找不到邊界而使 slice 延伸到後續 Project branch。Production code 與 Electron fixture 並未因此失敗。
+- 已把這兩個 static assertions 改為 line-ending-agnostic regex，仍要求 native menu branch 內必須呼叫 `reportMenuRouteCandidate` 且不得呼叫 `reportProjectActionCandidate`；沒有刪除或弱化檢查。
+- 本環境無法代替使用者 Windows 環境執行完整 `npm run verify`；修正後完整驗證仍待重新執行。
 
 ## 啟動與驗證方式
 
