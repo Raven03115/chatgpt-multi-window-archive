@@ -57,7 +57,7 @@ test("sidebar preload resolves nested targets through the full actionable-contro
   );
 });
 
-test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu actions", () => {
+test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu navigation intents", () => {
   const preloadSource = fs.readFileSync(
     path.join(
       __dirname,
@@ -95,9 +95,13 @@ test("pointer gesture snapshot keeps Close and Upgrade ahead of native menu acti
     pointerHandler.indexOf("else if (snapshot.upgradeControl)") <
       pointerHandler.indexOf("else if (snapshot.nativeMenu)")
   );
+  assert.match(
+    pointerHandler,
+    /else if \(snapshot\.nativeMenu\) \{\s*reportProjectActionCandidate\(event\.target\);\s*\}/
+  );
   assert(
     pointerHandler.indexOf("else if (snapshot.nativeMenu)") <
-      pointerHandler.indexOf("reportProjectActionCandidate(event.target)")
+      pointerHandler.indexOf("else if (\n    reportProjectActionCandidate(event.target)")
   );
   assert(
     clickHandler.indexOf("if (completedPointerGesture)") <
@@ -140,7 +144,7 @@ test("pointerdown creates a candidate while its following click never clears it"
   assert.notEqual(clickResult.action, "clear-project-intent");
 });
 
-test("a native menuitem is not a Project action candidate", () => {
+test("a native workspace menuitem is an eligible action candidate", () => {
   assertAction(decideProjectActionCandidate({
     phase: "pointerdown",
     controlKind: "menuitem",
@@ -151,7 +155,7 @@ test("a native menuitem is not a Project action candidate", () => {
     closeControl: false,
     externalControl: false,
     backdropControl: false
-  }), "ignore-control");
+  }), "create-project-intent");
 });
 
 test("Settings, dialogs, anchors, backdrops, close, and external controls never create candidates", () => {
@@ -263,6 +267,34 @@ test("native Project workspace without explicit intent is ignored", () => {
       source: "native-navigation"
     }),
     "ignore-native-route"
+  );
+});
+
+test("Explore-style menuitem intent forwards an unknown workspace route", () => {
+  const candidate = decideProjectActionCandidate({
+    phase: "pointerdown",
+    controlKind: "menuitem",
+    hasAnchor: false,
+    insideDialog: false,
+    overlayState: "closed",
+    overlayControl: false,
+    closeControl: false,
+    externalControl: false,
+    backdropControl: false
+  });
+
+  assertAction(candidate, "create-project-intent");
+
+  assertAction(
+    decide({
+      routeKind: "unknown-workspace",
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 2,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    }),
+    "forward-to-pane"
   );
 });
 
