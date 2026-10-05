@@ -38,44 +38,54 @@
 - 已新增 regression test，並只把 `GET automation-detail-action` 加入已觀察到的 supported request pairs。
 - 使用者已人工驗收 Scheduled Tasks 任務執行結果恢復正常；已合併到 `main`。
 
-### 2026-10-05 Explore menu routing diagnosis and candidate fix
+### 2026-10-05 Explore menu routing diagnosis
 
 - 使用者 diagnostics 可重複看到：
   - 探索 menu trigger 正常：`menu-trigger-detected`、`popup-detected`。
   - 點選探索 menu item 後發生 `native-route-ignored`。
   - routeKind 為 `unknown-workspace`。
   - reason 為 `native-route-without-intent`。
-- 同一份 diagnostics 中，其他非 anchor 控制項建立 one-time intent 後，`unknown-workspace` route 可正常被 consume、`pane-load-url` 並 `route-forwarded`。
-- Root cause：preload 原先把 `role=menuitem` 一律視為 native menu action，不建立短效 workspace navigation intent；主程序因此拒絕後續 native SPA workspace route。
-- 已先建立 regression tests，再修改 production policy。
-- 現行候選修正：
-  - `menuitem` 可成為 pointerdown action candidate。
-  - overlay control policy 將 `menu-action` 設為可建立短效 project/workspace intent，但不直接 route。
-  - preload 保留 ChatGPT 原生 menu click，同時對 native menu action送出 candidate；真正是否 forward 仍由後續有效 ChatGPT workspace route、active pane、intent generation 與 1 秒 lifetime 驗證。
-  - Settings、Search、dialog、anchor、backdrop、close、external control 仍不得建立 intent。
-  - menu trigger 本身仍只負責開 popup，不建立 route intent。
+- 同一份 diagnostics 中，其他已有 one-time intent 的 `unknown-workspace` route 可正常被 consume、`pane-load-url` 並 `route-forwarded`。
+- Root cause：探索項目是 native `role=menuitem` SPA action；現行 preload 保留 native menu click，但沒有對後續 workspace navigation 提供可驗證的一次性路由授權。
+
+### 2026-10-05 Explore candidate redesign after regression
+
+- 第一版候選修正曾把所有 `menuitem` 直接納入既有 Project action intent。
+- 使用者執行完整 verify 後，offline Electron fixture 正確失敗：`ordinary menuitem emitted an intent`。
+- 這證明第一版修正範圍過廣，會破壞既有「一般 native menu action 不應產生 Project intent」的隔離保證，因此該設計已被取代，不再採用。
+- 已重新設計為獨立的 `menu route candidate` / `menuRouteIntent`：
+  - 普通 `menuitem` 仍不是 Project action candidate。
+  - overlay policy 的 `menu-action` 仍維持 `projectIntent=false`。
+  - preload 只送出新的 `chatgpt-sidebar-menu-route-candidate`，保留 ChatGPT 原生 click。
+  - main process 建立獨立、最多 1 秒、綁定 active pane + generation 的 `menuRouteIntent`。
+  - 該 intent 只允許後續 `unknown-workspace` native route forward；conversation、project-workspace、project-conversation 不會因 menuRouteIntent 被轉送。
+  - Settings、Search、dialog、close、upgrade/external、backdrop 不得建立 menu route candidate。
+  - anchor、Project action、overlay/external route、dialog close、popup dismissal、workspace close 等情況會清除 stale menuRouteIntent。
+- 已新增/更新 regression tests，明確要求 native menu navigation 與 Project intent 使用不同 IPC / policy 路徑。
 
 ## 重要決策與被取代方案
 
 - 不採用：直接攔截探索項目 click 並自行硬編碼目的 URL。
-- 現行：保留 ChatGPT 原生 click / SPA routing，只補齊短效 intent，讓既有 route-policy 決定是否轉送到 active pane。
+- 不採用：把所有 `role=menuitem` 納入既有 Project action intent；verify 已證實會造成 ordinary menu regression。
+- 現行：保留 ChatGPT 原生 menu click，使用獨立短效 menu route candidate，只授權後續 `unknown-workspace` route。
 - 不採用：放寬所有 native navigation，使無 intent 的 sidebar route 都能進 pane。
-- 現行：仍要求有效 one-time intent，避免背景或非使用者操作的 native navigation 被誤轉送。
-- 不採用：為此次 Explore 問題修改 Scheduled Tasks、Rename detector 或 pane loadURL 邏輯。
+- 現行：仍要求有效 one-time intent，且 menuRouteIntent 的可 forward routeKind 比 Project intent 更窄。
+- 不採用：為此次 Explore 問題修改 Scheduled Tasks、Rename detector 或 pane `loadURL()` 邏輯。
 
 ## 已知問題與剩餘風險
 
-- 本次 Explore 候選版尚未在使用者 Windows / Electron 43.1.0 環境完成完整 `npm run verify`。
+- 修訂後 Explore 候選版尚未在使用者 Windows / Electron 43.1.0 環境重新完成完整 `npm run verify`。
 - 尚未人工驗收「探索 → 地圖／圖像／GPT／網站」是否可正常載入 active pane。
-- native menu action 現在可建立最長 1 秒的 one-time intent；雖然只有後續有效 workspace route 才能 consume，仍需 UI 驗收確認一般 conversation / Project row context menu 沒有 regression。
+- 普通 native menu item 會建立短效 menu route candidate，但只有後續 `unknown-workspace` navigation 才能 consume；仍需 verify + UI 驗收確認 account menu、conversation/Project context menu 無 regression。
 - Rename dialog 功能已正常，但開啟 modal 時背景 pane 被暫時收成 0×0、呈現大片黑色；這是已知 UI polish 項目，尚未處理，不能與 Explore 修復混在同一修改中。
 - ChatGPT Web API / DOM 仍可能因官方改版再次變動。
 
 ## 最近測試證據
 
 - 2026-10-05 使用者 diagnostics：Explore 選單點擊後可重複重現 `unknown-workspace + native-route-without-intent`；其他有 one-time intent 的同類 route 可正常 forward。
-- 已先提交 route-policy / overlay-policy regression tests，再修改 production 程式。
-- 本環境無法連線 GitHub clone repository，無法代替使用者 Windows 環境執行完整 `npm run verify`；完整驗證仍待執行。
+- 第一版 Explore 修正：使用者完整 verify 回報 offline Electron fixture failure `ordinary menuitem emitted an intent`，已據此撤銷「menuitem = Project intent」設計。
+- 修訂版已補 route-policy / preload static regression coverage，並恢復原本 ordinary menu / overlay Project-intent 隔離測試。
+- 本環境無法解析 GitHub host，因此無法代替使用者 Windows 環境執行完整 `npm run verify`；完整驗證仍待執行。
 
 ## 啟動與驗證方式
 
@@ -83,15 +93,16 @@
 cd D:\chatgpt-multi-window
 git fetch origin
 git switch --detach origin/fix/chatgpt-nested-dialog-2026-09-28
+git rev-parse HEAD
 npm run verify
 npm start
 ```
 
 ## 下一個驗收條件
 
-1. `npm run verify` 全部通過。
+1. `npm run verify` 全部通過，尤其 offline Electron fixture 不再出現 `ordinary menuitem emitted an intent`。
 2. 啟動 Electron 後打開側欄「探索」。
 3. 至少點選一個先前失敗的探索項目，內容正確載入目前 active pane。
-4. 再最小確認一個 conversation / Project row 的「…」選單仍正常，不發生非預期 pane 導航。
+4. 再最小確認一個一般 account / conversation / Project 的 native menu 操作仍正常，不發生非預期 pane 導航。
 5. 既有 Rename、Scheduled Tasks、一般 pane routing 無 regression。
 6. 驗收通過後，才合併本次修正至 `main`。
