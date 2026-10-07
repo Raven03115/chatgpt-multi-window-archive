@@ -399,3 +399,47 @@ test("confirmation shape contains sidebar and modal only and never enables fulls
   assert.equal(state.overlayOnlyModal, false);
   assert.equal(state.mainWorkspaceVisible, false);
 });
+
+test("full-page Settings remains above panes until explicit return", () => {
+  const pending = transitionOverlayState({
+    mode: "sidebar-only",
+    generation: 5
+  }, { type: "overlay-intent" });
+  const page = transitionOverlayState(
+    pending,
+    { type: "settings-page" }
+  );
+
+  assert.equal(page.mode, "settings-page");
+  assert.equal(page.overlayOnlyModal, false);
+  assert.equal(page.suppressPanes, true);
+  assert.equal(page.mainWorkspaceVisible, true);
+
+  const layout = buildOverlayShape({
+    mode: page.mode,
+    bounds: { width: 1200, height: 800 },
+    sidebarWidth: 260,
+    dialogRect: null,
+    popupRects: []
+  });
+
+  assert.deepEqual(layout, [
+    { x: 0, y: 0, width: 1200, height: 800 }
+  ]);
+
+  const stillPage = transitionOverlayState(
+    page,
+    { type: "dialog-missing" }
+  );
+  assert.equal(stillPage.mode, "settings-page");
+  assert.equal(stillPage.suppressPanes, true);
+
+  const restored = transitionOverlayState(
+    stillPage,
+    { type: "close" }
+  );
+  assert.equal(restored.mode, "sidebar-only");
+  assert.equal(restored.suppressPanes, false);
+  assert.equal(restored.mainWorkspaceVisible, false);
+});
+
