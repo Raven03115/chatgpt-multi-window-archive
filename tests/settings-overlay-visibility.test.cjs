@@ -21,7 +21,7 @@ test("profile route is opened in the existing overlay rather than ignored or for
   );
   const windowOpen = mainSource.slice(
     mainSource.indexOf("sidebarOverlayWindow.webContents.setWindowOpenHandler"),
-    mainSource.indexOf('sidebarOverlayWindow.webContents.on(\n    "render-process-gone"')
+    mainSource.indexOf('"render-process-gone"', mainSource.indexOf("sidebarOverlayWindow.webContents.setWindowOpenHandler"))
   );
 
   assert.match(
@@ -44,8 +44,8 @@ test("Settings return cannot load the home page into an active pane", () => {
     mainSource.indexOf("function clearOverlayPendingTimer")
   );
   const anchorHandler = mainSource.slice(
-    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-route-intent"'),
-    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-external-route-intent"')
+    mainSource.indexOf('"chatgpt-sidebar-route-intent"'),
+    mainSource.indexOf('"chatgpt-sidebar-external-route-intent"')
   );
   const returnPattern =
     /if \(settingsPageMode && isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\(\);\s*return;/;
@@ -60,8 +60,8 @@ test("Settings return cannot load the home page into an active pane", () => {
 
 test("Settings shape reports cannot dismiss the full-page view", () => {
   const handler = mainSource.slice(
-    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-shape-state"'),
-    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-diagnostic-event"')
+    mainSource.indexOf('"chatgpt-sidebar-shape-state"'),
+    mainSource.indexOf('"chatgpt-sidebar-diagnostic-event"')
   );
   assert.match(
     handler,
