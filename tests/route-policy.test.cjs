@@ -341,6 +341,35 @@ test("Project conversation anchor forwards to the active pane", () => {
   assertAction(decide({ routeKind }), "forward-to-pane");
 });
 
+test("profile Settings page and nested sections are never workspace routes", () => {
+  for (const url of [
+    "https://chatgpt.com/profile",
+    "https://chatgpt.com/profile/",
+    "https://chatgpt.com/profile/security",
+    "https://chatgpt.com/profile?tab=general"
+  ]) {
+    const routeKind = classifyRoute(url);
+    assert.equal(routeKind, "settings-page");
+    assertAction(decide({
+      routeKind,
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 2,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    }), "keep-in-overlay");
+    assertAction(decide({
+      routeKind,
+      source: "anchor-intent",
+      activePaneValid: true
+    }), "keep-in-overlay");
+  }
+  assert.equal(
+    classifyRoute("https://chatgpt.com/profiles"),
+    "unknown-workspace"
+  );
+});
+
 test("Settings remains in the overlay", () => {
   const routeKind = classifyRoute("https://chatgpt.com/settings");
   assert.equal(routeKind, "overlay-only");
