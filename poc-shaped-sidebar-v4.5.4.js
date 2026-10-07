@@ -16,6 +16,8 @@ const {
   MENU_ROUTE_INTENT_MAX_AGE_MS,
   PROJECT_ACTION_INTENT_MAX_AGE_MS,
   classifyRoute,
+  isSettingsPageUrl,
+  isSettingsReturnRoute,
   decideMenuRouteCandidate,
   decideProjectActionCandidate,
   decideSidebarRouting
@@ -113,12 +115,6 @@ const OVERLAY_TRANSPARENCY_CSS = `
    * already limits which screen regions are exposed, so forcing overlay
    * roots visible is unnecessary and can reveal stacked hidden labels.
    */
-
-  html.chatgpt-multi-settings-overlay main,
-  html.chatgpt-multi-settings-overlay [role="main"] {
-    visibility: visible !important;
-    pointer-events: auto !important;
-  }
 
   html.chatgpt-multi-fullscreen-overlay,
   html.chatgpt-multi-fullscreen-overlay body,
@@ -222,13 +218,12 @@ let sidebarInitialLoadComplete = false;
 
 let overlayOnlyUiActive = false;
 let fullscreenOverlayMode = false;
+let settingsPageMode = false;
 let overlayRuntimeState = transitionOverlayState(
   { mode: "sidebar-only", generation: 0 }
 );
 let overlayPendingTimer = null;
 let fullscreenCloseTimer = null;
-let settingsSurfaceCloseTimer = null;
-let settingsSurfaceObserved = false;
 let overlayOnlyIntentKind = null;
 let settingsOutsideEscapeGeneration = null;
 let settingsInjectedEscapeCloseIntentGeneration = null;
@@ -757,7 +752,8 @@ function isWorkspaceRouteUrl(url) {
   try {
     if (
       isExternalAccountRouteUrl(url) ||
-      isOverlayOnlyRouteUrl(url)
+      isOverlayOnlyRouteUrl(url) ||
+      isSettingsPageUrl(url)
     ) {
       return false;
     }
@@ -926,15 +922,8 @@ function layoutPaneViews() {
 }
 
 function updatePaneSuppression() {
-  // Settings must cover the workspace immediately, not only after a
-  // geometrically valid dialog is found. Search/Rename retain their
-  // existing visibility transitions.
   const shouldSuppress =
-    overlayRuntimeState.suppressPanes ||
-    (
-      overlayOnlyIntentKind === "settings" &&
-      overlayRuntimeState.mode === "overlay-intent-pending"
-    );
+    overlayRuntimeState.suppressPanes;
 
   if (
     panesSuppressedForOverlay ===
@@ -2229,6 +2218,22 @@ function handleSidebarNavigation(url) {
     return;
   }
 
+  if (isSettingsPageUrl(url)) {
+    openSettingsPage(url);
+    return;
+  }
+
+  if (settingsPageMode) {
+    if (isSettingsReturnRoute(url)) {
+      closeSettingsPage();
+      return;
+    }
+
+    // Leaving Settings for a different route restores the pane
+    // layout; existing route forwarding rules still apply.
+    closeSettingsPage();
+  }
+
   if (isExternalAccountRouteUrl(url)) {
     clearProjectActionIntent("external-route-opened");
     clearMenuRouteIntent("external-route-opened");
@@ -2386,21 +2391,16 @@ function applyOverlayRuntimeEvent(event, reason) {
 
   if (!overlayRuntimeState.overlayOnlyModal) {
     overlayOnlyIntentKind = null;
-    settingsSurfaceObserved = false;
-    clearSettingsSurfaceCloseTimer();
     settingsOutsideEscapeGeneration = null;
     settingsInjectedEscapeCloseIntentGeneration = null;
   }
-
-  sendSettingsOverlayClass(
-    overlayOnlyIntentKind === "settings" &&
-      overlayRuntimeState.overlayOnlyModal
-  );
 
   overlayOnlyUiActive =
     overlayRuntimeState.mode === "shaped-dialog";
   fullscreenOverlayMode =
     overlayRuntimeState.mode === "fullscreen";
+  settingsPageMode =
+    overlayRuntimeState.mode === "settings-page";
 
   if (isPaneContextToastSuppressed()) {
     clearAllPaneContextToasts();
@@ -2426,33 +2426,6 @@ function applyOverlayRuntimeEvent(event, reason) {
   }
 
   updatePaneSuppression();
-}
-
-function clearSettingsSurfaceCloseTimer() {
-  if (settingsSurfaceCloseTimer) {
-    clearTimeout(settingsSurfaceCloseTimer);
-    settingsSurfaceCloseTimer = null;
-  }
-}
-
-function scheduleSettingsSurfaceClose() {
-  if (settingsSurfaceCloseTimer) {
-    return;
-  }
-
-  settingsSurfaceCloseTimer = setTimeout(() => {
-    settingsSurfaceCloseTimer = null;
-
-    if (
-      !settingsSurfaceObserved ||
-      overlayOnlyIntentKind !== "settings" ||
-      !overlayRuntimeState.overlayOnlyModal
-    ) {
-      return;
-    }
-
-    unlockDialogShape(false);
-  }, 180);
 }
 
 function beginOverlayIntentPending() {
@@ -2510,14 +2483,12 @@ function setOverlayOnlyUiActive(active, kind = null) {
   if (active) {
     nativeDialogClosePending = false;
     if (kind === "settings" || kind === "search") {
-      clearSettingsSurfaceCloseTimer();
       const isNewExplicitIntent =
         overlayOnlyIntentKind !== kind ||
         !overlayRuntimeState.overlayOnlyModal;
       overlayOnlyIntentKind = kind;
 
       if (isNewExplicitIntent) {
-        settingsSurfaceObserved = false;
         settingsOutsideEscapeGeneration = null;
         settingsInjectedEscapeCloseIntentGeneration = null;
       }
@@ -2552,12 +2523,6 @@ function setOverlayOnlyUiActive(active, kind = null) {
       overlayRuntimeState.mode ===
       "overlay-intent-pending"
     ) {
-      // A new Settings intent can supersede pending Search without a
-      // fresh overlay state transition.
-      sendSettingsOverlayClass(
-        overlayOnlyIntentKind === "settings"
-      );
-      updatePaneSuppression();
       return;
     }
 
@@ -2570,17 +2535,6 @@ function setOverlayOnlyUiActive(active, kind = null) {
   applyOverlayRuntimeEvent(
     { type: "close" },
     "overlay-closed"
-  );
-}
-
-function sendSettingsOverlayClass(enabled) {
-  if (!isUsableWindow(sidebarOverlayWindow)) {
-    return;
-  }
-
-  sidebarOverlayWindow.webContents.send(
-    "chatgpt-sidebar-set-settings-mode",
-    Boolean(enabled)
   );
 }
 
@@ -2606,7 +2560,10 @@ function clearFullscreenCloseTimer() {
 }
 
 function scheduleFullscreenOverlayClose() {
-  if (overlayRuntimeState.overlayOnlyModal) {
+  if (
+    overlayRuntimeState.overlayOnlyModal ||
+    settingsPageMode
+  ) {
     return false;
   }
 
@@ -2674,6 +2631,75 @@ function closeFullscreenOverlayMode() {
   }
 }
 
+function openSettingsPage(url) {
+  if (!isSettingsPageUrl(url)) {
+    return;
+  }
+
+  clearProjectActionIntent("settings-page-opened");
+  clearMenuRouteIntent("settings-page-opened");
+  clearOverlayPendingTimer();
+  clearFullscreenCloseTimer();
+  nativeDialogClosePending = false;
+  lockedDialogRect = null;
+  popupRects = [];
+  manualExpanded = false;
+
+  if (!settingsPageMode) {
+    applyOverlayRuntimeEvent(
+      { type: "settings-page" },
+      "settings-page-navigation"
+    );
+  }
+
+  sendFullscreenOverlayClass(true);
+  applyOverlayShape();
+
+  if (!isUsableWindow(sidebarOverlayWindow)) {
+    return;
+  }
+
+  const currentUrl = sidebarOverlayWindow.webContents.getURL();
+  if (currentUrl !== url) {
+    sidebarOverlayWindow.loadURL(url).catch((error) => {
+      console.error(
+        "[Integration v4.6.2] Settings page load failed:",
+        error.message
+      );
+      if (settingsPageMode) {
+        closeSettingsPage();
+      }
+    });
+  }
+}
+
+function closeSettingsPage() {
+  if (!settingsPageMode) {
+    return;
+  }
+
+  clearProjectActionIntent("settings-page-return");
+  clearMenuRouteIntent("settings-page-return");
+  clearOverlayPendingTimer();
+  lockedDialogRect = null;
+  popupRects = [];
+  nativeDialogClosePending = false;
+  applyOverlayRuntimeEvent(
+    { type: "close" },
+    "settings-page-return"
+  );
+  sendFullscreenOverlayClass(false);
+  applyOverlayShape();
+
+  // Returning to the official sidebar's home URL should not
+  // replace or reload any existing pane conversation.
+  sidebarRouteForwardSuppressionUntil =
+    Math.max(
+      sidebarRouteForwardSuppressionUntil,
+      Date.now() + 350
+    );
+}
+
 function openFullscreenAccountRoute(url) {
   if (!isExternalAccountRouteUrl(url)) {
     return;
@@ -2694,6 +2720,10 @@ function openFullscreenAccountRoute(url) {
 }
 
 function dismissSidebarTransientUi() {
+  if (settingsPageMode) {
+    return;
+  }
+
   if (!isUsableWindow(sidebarOverlayWindow)) {
     return;
   }
@@ -3578,7 +3608,7 @@ function applyOverlayShape() {
 
   let shapeRects;
 
-  if (fullscreenOverlayMode) {
+  if (fullscreenOverlayMode || settingsPageMode) {
     shapeRects = [
       {
         x: 0,
@@ -3890,11 +3920,7 @@ function createSidebarOverlayWindow() {
       sidebarOverlayWindow.show();
 
       sendFullscreenOverlayClass(
-        fullscreenOverlayMode
-      );
-      sendSettingsOverlayClass(
-        overlayOnlyIntentKind === "settings" &&
-          overlayRuntimeState.overlayOnlyModal
+        fullscreenOverlayMode || settingsPageMode
       );
 
       sidebarInitialLoadComplete = true;
@@ -3923,7 +3949,9 @@ function createSidebarOverlayWindow() {
 
   sidebarOverlayWindow.webContents.setWindowOpenHandler(
     ({ url }) => {
-      if (isExternalAccountRouteUrl(url)) {
+      if (isSettingsPageUrl(url)) {
+        openSettingsPage(url);
+      } else if (isExternalAccountRouteUrl(url)) {
         openFullscreenAccountRoute(url);
       } else if (
         isOverlayOnlyRouteUrl(url)
@@ -3974,7 +4002,6 @@ function createSidebarOverlayWindow() {
 
   sidebarOverlayWindow.on("closed", () => {
     clearProjectActionIntent("sidebar-window-closed");
-    clearSettingsSurfaceCloseTimer();
     clearOverlayPendingTimer();
     sidebarOverlayWindow = null;
     lastAppliedOverlayShapeSignature = "";
@@ -4278,6 +4305,12 @@ ipcMain.on(
       return;
     }
 
+    // A full-page Settings route owns its content and nested dialogs.
+    // Generic Rename/Search dialog heuristics must not collapse it.
+    if (settingsPageMode) {
+      return;
+    }
+
     const bounds =
       sidebarOverlayWindow.getBounds();
 
@@ -4286,15 +4319,6 @@ ipcMain.on(
         state?.dialogRect,
         bounds
       );
-    const nativeSettingsSurfacePresent =
-      overlayOnlyIntentKind === "settings" &&
-      overlayRuntimeState.overlayOnlyModal &&
-      state?.settingsSurfacePresent === true;
-    if (nativeSettingsSurfacePresent) {
-      settingsSurfaceObserved = true;
-      clearSettingsSurfaceCloseTimer();
-    }
-
     const nextDialogKind =
       state?.dialogKind ===
         "compact-confirmation"
@@ -4395,16 +4419,6 @@ ipcMain.on(
     ) {
       if (nativeDialogClosePending) {
         unlockDialogShape(true);
-      } else if (
-        settingsSurfaceObserved &&
-        overlayOnlyIntentKind === "settings"
-      ) {
-        // Keep Settings while its native root persists, even if its
-        // previous inner rectangle was replaced during tab changes.
-        lockedDialogRect = null;
-        if (!nativeSettingsSurfacePresent) {
-          scheduleSettingsSurfaceClose();
-        }
       } else {
         lockedDialogRect = null;
         applyOverlayRuntimeEvent(
@@ -4412,27 +4426,6 @@ ipcMain.on(
           "dialog-surface-removed"
         );
       }
-    } else if (
-      nativeSettingsSurfacePresent &&
-      overlayRuntimeState.mode === "overlay-intent-pending"
-    ) {
-      // A visible official Settings dialog may have a nearly fullscreen
-      // root, while its inner panel fails the generic size heuristic.
-      // Its presence, following explicit Settings intent, is enough.
-      clearOverlayPendingTimer();
-      applyOverlayRuntimeEvent(
-        { type: "dialog-detected" },
-        "settings-native-surface-detected"
-      );
-    } else if (
-      settingsSurfaceObserved &&
-      overlayOnlyIntentKind === "settings" &&
-      !nativeSettingsSurfacePresent &&
-      !nextDialogRect
-    ) {
-      // Wait briefly for same-document Settings tab replacements.
-      // Do not dismiss a transiently unmounted official dialog.
-      scheduleSettingsSurfaceClose();
     }
 
     if (!manualExpanded) {
@@ -4676,6 +4669,16 @@ ipcMain.on(
       return;
     }
 
+    if (settingsPageMode && isSettingsReturnRoute(url)) {
+      closeSettingsPage();
+      return;
+    }
+
+    if (isSettingsPageUrl(url)) {
+      openSettingsPage(url);
+      return;
+    }
+
     clearProjectActionIntent("anchor-route-intent");
     clearMenuRouteIntent("anchor-route-intent");
 
@@ -4905,7 +4908,6 @@ app.on("will-quit", () => {
   clearPaneCloseNotice();
   clearProjectActionIntent("app-will-quit");
   clearMenuRouteIntent("app-will-quit");
-  clearSettingsSurfaceCloseTimer();
   clearOverlayPendingTimer();
   clearFullscreenCloseTimer();
   saveOpenPaneUrls();
