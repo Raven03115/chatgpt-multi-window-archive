@@ -114,6 +114,12 @@ const OVERLAY_TRANSPARENCY_CSS = `
    * roots visible is unnecessary and can reveal stacked hidden labels.
    */
 
+  html.chatgpt-multi-settings-overlay main,
+  html.chatgpt-multi-settings-overlay [role="main"] {
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+
   html.chatgpt-multi-fullscreen-overlay,
   html.chatgpt-multi-fullscreen-overlay body,
   html.chatgpt-multi-fullscreen-overlay #root,
@@ -221,6 +227,8 @@ let overlayRuntimeState = transitionOverlayState(
 );
 let overlayPendingTimer = null;
 let fullscreenCloseTimer = null;
+let settingsSurfaceCloseTimer = null;
+let settingsSurfaceObserved = false;
 let overlayOnlyIntentKind = null;
 let settingsOutsideEscapeGeneration = null;
 let settingsInjectedEscapeCloseIntentGeneration = null;
@@ -918,8 +926,15 @@ function layoutPaneViews() {
 }
 
 function updatePaneSuppression() {
+  // Settings must cover the workspace immediately, not only after a
+  // geometrically valid dialog is found. Search/Rename retain their
+  // existing visibility transitions.
   const shouldSuppress =
-    overlayRuntimeState.suppressPanes;
+    overlayRuntimeState.suppressPanes ||
+    (
+      overlayOnlyIntentKind === "settings" &&
+      overlayRuntimeState.mode === "overlay-intent-pending"
+    );
 
   if (
     panesSuppressedForOverlay ===
@@ -2371,9 +2386,16 @@ function applyOverlayRuntimeEvent(event, reason) {
 
   if (!overlayRuntimeState.overlayOnlyModal) {
     overlayOnlyIntentKind = null;
+    settingsSurfaceObserved = false;
+    clearSettingsSurfaceCloseTimer();
     settingsOutsideEscapeGeneration = null;
     settingsInjectedEscapeCloseIntentGeneration = null;
   }
+
+  sendSettingsOverlayClass(
+    overlayOnlyIntentKind === "settings" &&
+      overlayRuntimeState.overlayOnlyModal
+  );
 
   overlayOnlyUiActive =
     overlayRuntimeState.mode === "shaped-dialog";
@@ -2404,6 +2426,33 @@ function applyOverlayRuntimeEvent(event, reason) {
   }
 
   updatePaneSuppression();
+}
+
+function clearSettingsSurfaceCloseTimer() {
+  if (settingsSurfaceCloseTimer) {
+    clearTimeout(settingsSurfaceCloseTimer);
+    settingsSurfaceCloseTimer = null;
+  }
+}
+
+function scheduleSettingsSurfaceClose() {
+  if (settingsSurfaceCloseTimer) {
+    return;
+  }
+
+  settingsSurfaceCloseTimer = setTimeout(() => {
+    settingsSurfaceCloseTimer = null;
+
+    if (
+      !settingsSurfaceObserved ||
+      overlayOnlyIntentKind !== "settings" ||
+      !overlayRuntimeState.overlayOnlyModal
+    ) {
+      return;
+    }
+
+    unlockDialogShape(false);
+  }, 180);
 }
 
 function beginOverlayIntentPending() {
@@ -2461,12 +2510,14 @@ function setOverlayOnlyUiActive(active, kind = null) {
   if (active) {
     nativeDialogClosePending = false;
     if (kind === "settings" || kind === "search") {
+      clearSettingsSurfaceCloseTimer();
       const isNewExplicitIntent =
         overlayOnlyIntentKind !== kind ||
         !overlayRuntimeState.overlayOnlyModal;
       overlayOnlyIntentKind = kind;
 
       if (isNewExplicitIntent) {
+        settingsSurfaceObserved = false;
         settingsOutsideEscapeGeneration = null;
         settingsInjectedEscapeCloseIntentGeneration = null;
       }
@@ -2513,6 +2564,17 @@ function setOverlayOnlyUiActive(active, kind = null) {
   applyOverlayRuntimeEvent(
     { type: "close" },
     "overlay-closed"
+  );
+}
+
+function sendSettingsOverlayClass(enabled) {
+  if (!isUsableWindow(sidebarOverlayWindow)) {
+    return;
+  }
+
+  sidebarOverlayWindow.webContents.send(
+    "chatgpt-sidebar-set-settings-mode",
+    Boolean(enabled)
   );
 }
 
@@ -3824,6 +3886,10 @@ function createSidebarOverlayWindow() {
       sendFullscreenOverlayClass(
         fullscreenOverlayMode
       );
+      sendSettingsOverlayClass(
+        overlayOnlyIntentKind === "settings" &&
+          overlayRuntimeState.overlayOnlyModal
+      );
 
       sidebarInitialLoadComplete = true;
 
@@ -3902,6 +3968,7 @@ function createSidebarOverlayWindow() {
 
   sidebarOverlayWindow.on("closed", () => {
     clearProjectActionIntent("sidebar-window-closed");
+    clearSettingsSurfaceCloseTimer();
     clearOverlayPendingTimer();
     sidebarOverlayWindow = null;
     lastAppliedOverlayShapeSignature = "";
@@ -4213,6 +4280,15 @@ ipcMain.on(
         state?.dialogRect,
         bounds
       );
+    const nativeSettingsSurfacePresent =
+      overlayOnlyIntentKind === "settings" &&
+      overlayRuntimeState.overlayOnlyModal &&
+      state?.settingsSurfacePresent === true;
+    if (nativeSettingsSurfacePresent) {
+      settingsSurfaceObserved = true;
+      clearSettingsSurfaceCloseTimer();
+    }
+
     const nextDialogKind =
       state?.dialogKind ===
         "compact-confirmation"
@@ -4320,6 +4396,27 @@ ipcMain.on(
           "dialog-surface-removed"
         );
       }
+    } else if (
+      nativeSettingsSurfacePresent &&
+      overlayRuntimeState.mode === "overlay-intent-pending"
+    ) {
+      // A visible official Settings dialog may have a nearly fullscreen
+      // root, while its inner panel fails the generic size heuristic.
+      // Its presence, following explicit Settings intent, is enough.
+      clearOverlayPendingTimer();
+      applyOverlayRuntimeEvent(
+        { type: "dialog-detected" },
+        "settings-native-surface-detected"
+      );
+    } else if (
+      settingsSurfaceObserved &&
+      overlayOnlyIntentKind === "settings" &&
+      !nativeSettingsSurfacePresent &&
+      !nextDialogRect
+    ) {
+      // Wait briefly for same-document Settings tab replacements.
+      // Do not dismiss a transiently unmounted official dialog.
+      scheduleSettingsSurfaceClose();
     }
 
     if (!manualExpanded) {
@@ -4792,6 +4889,7 @@ app.on("will-quit", () => {
   clearPaneCloseNotice();
   clearProjectActionIntent("app-will-quit");
   clearMenuRouteIntent("app-will-quit");
+  clearSettingsSurfaceCloseTimer();
   clearOverlayPendingTimer();
   clearFullscreenCloseTimer();
   saveOpenPaneUrls();
