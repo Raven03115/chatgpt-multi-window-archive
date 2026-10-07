@@ -1529,6 +1529,55 @@ async function run() {
     "missing dialog did not return to sidebar-only"
   );
 
+  // Full-page Settings no longer depends on a dialog rectangle.
+  // Its native /profile route remains visible until app return.
+  const paneUrlBeforeSettingsPage = paneView.webContents.getURL();
+  overlayState = transitionOverlayState(overlayState, {
+    type: "settings-page"
+  });
+  fixtureDialogRect = null;
+  fixturePopupRects = [];
+  applyFixtureOverlayShape();
+  overlayWindow.webContents.send(
+    "chatgpt-sidebar-set-fullscreen-mode",
+    true
+  );
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const settingsPageContentVisible =
+    await overlayWindow.webContents.executeJavaScript(
+      'getComputedStyle(document.querySelector("main")).visibility'
+    );
+  assert(
+    overlayState.mode === "settings-page" &&
+    overlayState.suppressPanes === true &&
+    settingsPageContentVisible === "visible" &&
+    shapeContainsPoint(appliedFixtureShape, 1100, 700),
+    "full-page Settings is clipped or has not suppressed panes"
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1550));
+  assert(
+    overlayState.mode === "settings-page" &&
+    shapeContainsPoint(appliedFixtureShape, 1100, 700),
+    "full-page Settings reverted to sidebar-only after 1.5 seconds"
+  );
+
+  overlayState = transitionOverlayState(overlayState, {
+    type: "close"
+  });
+  applyFixtureOverlayShape();
+  overlayWindow.webContents.send(
+    "chatgpt-sidebar-set-fullscreen-mode",
+    false
+  );
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert(
+    overlayState.mode === "sidebar-only" &&
+    overlayState.suppressPanes === false &&
+    !shapeContainsPoint(appliedFixtureShape, 1100, 700) &&
+    paneView.webContents.getURL() === paneUrlBeforeSettingsPage,
+    "return from full-page Settings did not restore original pane"
+  );
+
   await runConfirmationFlow({
     triggerSelector: "#conversation-menu-path",
     minimumWidth: 320,
