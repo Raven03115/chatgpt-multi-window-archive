@@ -911,6 +911,7 @@ async function run() {
         fixtureSettingsSurfaceCloseTimer = setTimeout(() => {
           fixtureSettingsSurfaceCloseTimer = null;
           fixtureSettingsSurfaceObserved = false;
+          fixtureNativeDialogClosePending = false;
           fixtureOverlayOnlyKind = null;
           overlayState = transitionOverlayState(overlayState, {
             type: "close"
