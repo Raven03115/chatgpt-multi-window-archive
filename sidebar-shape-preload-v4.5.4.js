@@ -84,6 +84,17 @@ const OVERLAY_ISOLATION_CSS = `
     pointer-events: none !important;
   }
 
+  /*
+   * The current Settings layout may render content under <main>.
+   * Only a user-initiated Settings overlay can expose it; ordinary
+   * sidebar/pane isolation and Rename remain unchanged.
+   */
+  html.chatgpt-multi-settings-overlay main,
+  html.chatgpt-multi-settings-overlay [role="main"] {
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+
   html.chatgpt-multi-fullscreen-overlay,
   html.chatgpt-multi-fullscreen-overlay body,
   html.chatgpt-multi-fullscreen-overlay #root,
@@ -121,6 +132,21 @@ function installOverlayIsolationStyle() {
     );
   }
 }
+
+ipcRenderer.on(
+  "chatgpt-sidebar-set-settings-mode",
+  (_event, enabled) => {
+    if (!document.documentElement) {
+      return;
+    }
+
+    document.documentElement.classList.toggle(
+      "chatgpt-multi-settings-overlay",
+      Boolean(enabled)
+    );
+    scheduleFrameReport();
+  }
+);
 
 ipcRenderer.on(
   "chatgpt-sidebar-set-fullscreen-mode",
@@ -1024,8 +1050,23 @@ function syncPopupResizeObservers(elements) {
   observedPopupSurfaces = next;
 }
 
+function hasVisibleNativeSettingsSurface() {
+  if (activeOverlayOnlyKind !== "settings") {
+    return false;
+  }
+
+  return collectElements(DIALOG_ROOT_SELECTORS).some(
+    (element) =>
+      isVisible(element) &&
+      hasInteractiveContent(element) &&
+      getRect(element).right > sidebarWidth + 1
+  );
+}
+
 function reportShapeState() {
   syncSidebarWidth();
+  const settingsSurfacePresent =
+    hasVisibleNativeSettingsSurface();
   const dialogSurface =
     findBestDialogSurface();
   const dialogRect =
@@ -1101,7 +1142,8 @@ function reportShapeState() {
   const payload = {
     dialogRect,
     dialogKind,
-    popupRects
+    popupRects,
+    settingsSurfacePresent
   };
 
   const signature =
