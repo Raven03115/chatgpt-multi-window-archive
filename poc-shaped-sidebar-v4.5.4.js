@@ -3954,7 +3954,19 @@ function createSidebarOverlayWindow() {
 
   sidebarOverlayWindow.webContents.setWindowOpenHandler(
     ({ url }) => {
-      if (isSettingsPageUrl(url)) {
+      if (settingsPageMode && isSettingsReturnRoute(url)) {
+        // The official return action may request a new window. Keep
+        // the existing overlay and restore the existing pane sessions.
+        closeSettingsPage();
+        sidebarOverlayWindow.loadURL(CHATGPT_URL).catch(
+          (error) => {
+            console.error(
+              "[Integration v4.6.2] Settings return load failed:",
+              error.message
+            );
+          }
+        );
+      } else if (isSettingsPageUrl(url)) {
         openSettingsPage(url);
       } else if (isExternalAccountRouteUrl(url)) {
         openFullscreenAccountRoute(url);
@@ -4011,6 +4023,12 @@ function createSidebarOverlayWindow() {
   sidebarOverlayWindow.on("closed", () => {
     clearProjectActionIntent("sidebar-window-closed");
     clearOverlayPendingTimer();
+    if (settingsPageMode) {
+      applyOverlayRuntimeEvent(
+        { type: "close" },
+        "sidebar-window-closed"
+      );
+    }
     sidebarOverlayWindow = null;
     lastAppliedOverlayShapeSignature = "";
   });
@@ -4683,7 +4701,11 @@ ipcMain.on(
     }
 
     if (isSettingsPageUrl(url)) {
-      openSettingsPage(url);
+      // Native navigation owns in-page Settings tabs. New-window
+      // requests are handled by the window-open handler instead.
+      if (!settingsPageMode) {
+        openSettingsPage(url);
+      }
       return;
     }
 
