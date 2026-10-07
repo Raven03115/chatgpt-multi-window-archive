@@ -2480,6 +2480,11 @@ function beginOverlayIntentPending() {
 }
 
 function setOverlayOnlyUiActive(active, kind = null) {
+  if (settingsPageMode) {
+    // The Settings profile is a real page rather than a modal.
+    return;
+  }
+
   if (active) {
     nativeDialogClosePending = false;
     if (kind === "settings" || kind === "search") {
@@ -3983,6 +3988,9 @@ function createSidebarOverlayWindow() {
     "render-process-gone",
     (_event, details) => {
       clearProjectActionIntent("sidebar-renderer-gone");
+      if (settingsPageMode) {
+        closeSettingsPage();
+      }
 
       recordIntegrationEvent({
         event: "sidebar-renderer-gone",
@@ -4676,6 +4684,12 @@ ipcMain.on(
 
     if (isSettingsPageUrl(url)) {
       openSettingsPage(url);
+      return;
+    }
+
+    if (settingsPageMode) {
+      // Native Settings page links remain owned by the overlay.
+      // In particular they must not replace the active pane.
       return;
     }
 
