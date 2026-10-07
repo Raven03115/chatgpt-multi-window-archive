@@ -4,7 +4,7 @@
 
 此 Repository 是 Windows 上的 ChatGPT Multi Pane Electron 工具，直接載入官方 `chatgpt.com`，提供共用官方側欄與多個獨立 ChatGPT 窗格。
 
-目前工作項目是 2026-10-08 側欄「設定」面板顯示修復。使用者開啟 Settings 時只看到設定左側選單，右側內容被多個 pane 覆蓋；前一項 Explore 修復已合併至 main 並完成使用者驗收。
+目前工作項目是 2026-10-08 側欄「設定」完整頁面（/profile）被多窗格覆蓋的問題。已依新證據放棄前一個大型 dialog 偵測候選方案，改以官方 Settings route 管理獨立的 full-page overlay。前一項 Explore 修復已在 main 完成驗收。
 
 ## 目前權威來源
 
@@ -65,16 +65,20 @@
   - anchor、Project action、overlay/external route、dialog close、popup dismissal、workspace close 等情況會清除 stale menuRouteIntent。
 - 已新增/更新 regression tests，明確要求 native menu navigation 與 Project intent 使用不同 IPC / policy 路徑。
 
-### 2026-10-08 Settings overlay visibility candidate（待 UI 驗收）
+### 2026-10-08 Settings /profile 路由架構重評估及新候選版
 
-- 使用者 diagnostics 三次重現：點擊 Settings 進入 `overlay-intent-pending`，1.5 秒後 `dialog-surface-timeout`、`no-valid-dialog-surface`，程式回到 `sidebar-only`；右側 pane 繼續覆蓋設定內容。
-- 原先 generic dialog detector 會排除接近全畫面的 root / backdrop，main process 亦拒絕 oversized `dialogRect`；但官方 Settings 可能有可見的 semantic `role=dialog` 根節點而沒有符合舊尺寸限制的內部矩形。此 DOM 形狀尚未在使用者真實頁面驗證。
-- 先建立 oversized Settings 的 offline Electron fixture 測試：native dialog root 占滿 viewport、沒有可用內部 `dialogRect`、內容位於 `main`，要求設定保持可見超過 1.5 秒且關閉後還原 overlay/sidebar。
-- 候選實作只在**使用者明確開啟 Settings** 後辨識可見的 native modal semantic root，並將 `settingsSurfacePresent` 布林值傳給主程序；不放寬 generic Rename/dialog 的 size heuristic。
-- Settings intent 的 pending 階段立即 suppress panes；存在 Settings semantic surface 時，在沒有合格矩形的情況下仍可切換至 `shaped-dialog`，取消 1.5 秒 pending timeout。
-- 只有 Settings 模式會暫時解除側欄 overlay 上 `main` / `[role=main]` 的 CSS 隱藏，避免官方設定內容放在其中時不可見。
-- 關閉官方 Settings semantic root 後，短暫等待約 180ms 以避開分頁 DOM replacement，再恢復 pane bounds 與 sidebar-only；正式 Settings 關閉按鈕與 Escape 仍保留既有 native close flow。
-- 使用者尚未在真實 ChatGPT Settings DOM 完成 UI 驗收；不應將候選版稱為已修復完成。
+- 先前 diagnostics 多次證實 `overlay-intent-pending` 1.5 秒後 `dialog-surface-timeout`，但當時並無足夠證據說明 Settings 的 DOM 結構。
+- 2026-10-08 使用者再次實測：前一候選版僅初始幾秒顯示 Settings，隨後 pane 覆蓋右側；截圖左側為具有「返回應用程式」的完整設定頁，程式實際記錄 `native sidebar window route ignored: https://chatgpt.com/profile`。返回流程亦曾將根網址載入 pane，應避免覆寫原對話。
+- 新事實證明前一版本「Settings 為大型 dialog」的架構假設不適用，現已將先前新增的 Settings DOM 尺寸特例、CSS 覆寫與 oversized dialog fixture **自 fix branch 檔案內容撤回**；沒有修改已正式驗收的 main。
+- 新方案：
+  - `lib/route-policy.cjs` 集中辨識 `/profile` 及其子路由為 `settings-page`，永不作為 workspace pane 目的地，僅在正確 HTTPS / chatgpt.com 主機生效。
+  - `lib/overlay-policy.cjs` 新增 `settings-page` 狀態，持續 suppress panes、顯示完整官方 workspace 內容、對整個 overlay window 設 full shape；不依賴 1.5 秒 dialog timer。
+  - main process 處理既有 sidebar 同頁導航與 `window.open(/profile)`：後者在原 sidebar overlay 視窗開啟設定，不建立另一個視窗，也不轉送 pane。
+  - 設定頁返回根網址時只解除 Settings 全頁 overlay，恢復既有 WebContentsView bounds，不把 `https://chatgpt.com/` 載入 active pane；同時處理返回要求透過 `window.open` 的情況。
+  - Settings 全頁狀態不會被 generic Rename/Search popup 偵測、Escape 的 fullscreen close timer 或 pane focus 事件意外解除。Search、Rename、Explore、Upgrade 原本行為保留。
+  - full-page 模式重用已存在的 fullscreen CSS 可見性處理；不再以 DOM dialog 形狀猜測 Settings 的存活。
+- 已補 `tests/route-policy.test.cjs` / `tests/overlay-policy.test.cjs` 與 `tests/settings-overlay-visibility.test.cjs`，並新增 offline Electron fixture 中 Settings full-page 狀態與不變動 pane URL 的測試。
+- 仍是**待驗收候選版**。正式 Electron Windows `npm run verify` 與真實 ChatGPT UI 尚未執行，不得稱已完成修復。
 
 ## 重要決策與被取代方案
 
@@ -84,27 +88,23 @@
 - 不採用：放寬所有 native navigation，使無 intent 的 sidebar route 都能進 pane。
 - 現行：仍要求有效 one-time intent，且 menuRouteIntent 的可 forward routeKind 比 Project intent 更窄。
 - 不採用：為此次 Explore 問題修改 Scheduled Tasks、Rename detector 或 pane `loadURL()` 邏輯。
+- Settings 目前明確不採用：把完整 `/profile` 頁面硬塞入 modal dialog 尺寸判定，或單純延長 1.5 秒 timeout。已以 route-based full-page state 取代。
+- Settings 目前推薦：基於使用者實際觀察到的 `/profile` 進行受控的全頁 overlay，並於返回後還原原 pane，不重載。
 
 ## 已知問題與剩餘風險
 
-- 使用者已人工驗收「探索」功能恢復正常，可正常開啟探索項目並使用。
-- 使用者未另外貼出最終修正後完整 `148/148` 終端摘要，因此不可把完整 automated verify 記錄描述成已取得；已知上一輪 offline Electron fixture 已通過，後續兩個 CRLF static-test false failures亦已修正。
-- 普通 native menu item 仍使用獨立短效 menu route candidate，只有後續 `unknown-workspace` navigation 可 consume；Project intent 隔離保留。
-- **Settings 候選版尚未實測使用者真實 UI**；如 ChatGPT 新版 Settings 沒有可見 semantic dialog root，須先補無敏感內容的 DOM/diagnostics 證據再修，不能盲目增加 fallback。
-- Rename dialog 功能已正常，但開啟 modal 時背景 pane 被暫時收成 0×0、呈現大片黑色；這是獨立的 UI polish，尚未處理。
-- Settings 模式暫時顯示官方 overlay 的 `main`，因此需人工確認沒有多餘底層 workspace、錯誤遮罩或點擊穿透。
-- ChatGPT Web API / DOM 仍可能因官方改版再次變動。
+- 新版 Settings 使用 `/profile` 已由使用者執行紀錄證實，但官方網站仍可能改變路徑或返回流程；正式頁面全部操作尚未人工驗收。
+- 本次已避免將首頁返回誤送進 pane，但使用者截圖中其它非 Settings 導航與 renderer errors 可能是獨立問題；若仍重現，需以發生時 diagnostics 區分。
+- Electron UI 與真實網頁狀態尚未實測，尤其 `window.open` 與 full-page 導航、視窗焦點、背景 pane bounds 的實際表現需驗收。
+- Rename modal 的黑色背景屬另一個尚未解決的 UI polish，不能與 Settings 問題一起修改。
+- 不應對正式 main 做修改直到此次 fix branch 完整測試與 UI 驗收。
 
 ## 最近測試證據
 
-- 2026-10-05 使用者 diagnostics：Explore 選單點擊後可重複重現 `unknown-workspace + native-route-without-intent`；其他有 one-time intent 的同類 route 可正常 forward。
-- 第一版 Explore 修正：使用者完整 verify 回報 offline Electron fixture failure `ordinary menuitem emitted an intent`，已據此撤銷「menuitem = Project intent」設計。
-- 修訂版第二次 verify：offline Electron fixture 已通過，ordinary menu regression 已消失；148 個測試中 146 pass、2 fail。
-- 剩餘 2 個 failure 都位於 `tests/route-policy.test.cjs` 的 static source slicing：測試用 LF-only 字串尋找 branch 邊界，但 Windows 讀取 source 時保留 CRLF，`indexOf(...\n...)` 找不到邊界而使 slice 延伸到後續 Project branch。Production code 與 Electron fixture 並未因此失敗。
-- 已把這兩個 static assertions 改為 line-ending-agnostic regex，仍要求 native menu branch 內必須呼叫 `reportMenuRouteCandidate` 且不得呼叫 `reportProjectActionCandidate`；沒有刪除或弱化檢查。
-- 使用者已完成 Explore UI 驗收並回報可正常使用；Explore 的最終完整 `npm run verify` 終端摘要未在對話中提供。
-- 2026-10-08 新 Settings 候選版：在工具隔離環境以 V8 JS parser 驗證 production main/preload、overlay-policy、Electron fixture runner 與新 test file **語法皆 PASS**；離線執行 4 個與 Settings 顯示/關閉相關的 source/policy contract tests **4/4 PASS**（mocked Node `fs/path/test` 模組）。此證據不是 Electron fixture 或完整 npm verify 通過。
-- 無法在此環境執行完整 `npm run verify`：GitHub 網域無法解析，缺完整 repo 與 Electron Windows UI；修正後 Electron fixture 與使用者 UI 仍待正式驗證。
+- 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
+- 2026-10-08 基於 GitHub 當前 fix branch source 的 V8 隔離檢查：相關 `main`、route policy、overlay policy、新增測試與 fixture 程式語法通過；以 Node API mock 執行 policy 與 static tests 65/65 PASS（後續新增一項 return-window contract 測試仍需重新跑）。
+- **以上並非 `npm run verify`**。本工具執行環境無法 DNS 解析 github.com 以取得完整可執行 repository，也不能替代 Windows Electron 43.1.0 的實測。
+- 使用者應在 Windows 依下列步驟跑完整 npm run verify；新 fixture 若失敗需先分析 root cause。
 
 ## 啟動與驗證方式
 
@@ -119,8 +119,9 @@ npm start
 
 ## 下一個驗收條件
 
-1. 在 Windows 上執行 `npm run verify` 並提供總摘要；特別確認新的 oversized Settings Electron fixture pass，及既有 Rename、Search、Upgrade、Explore fixture 不回歸。
-2. 啟動候選分支，打開 Settings，確認左側導航與右側內容均能完整顯示，且切換 Settings 分頁不會被 pane 覆蓋或自動退出。
-3. 關閉 Settings，確認原有 pane 數量、內容與交互立即恢復。
-4. 如 Settings 實測失敗，先收集現場 diagnostics、無敏感 DOM 概況並重新定位問題，不進行不明原因的 patch 累加。
-5. 本候選修復通過驗收後另行取得合併至 `main` 授權。
+1. Windows 上 `npm run verify` 全部通過，包括既有 overlay/route regression 及新增 full-page Settings fixture。
+2. 重新開啟 Settings，等待至少 5 秒；確認設定左側導航和右側內容完整顯示且可操作。
+3. 切換 Settings 分頁（例如外觀、通知）後依然完整顯示，不再被 pane 覆蓋。
+4. 點「返回應用程式」後，原本 3 個 pane 的對話與滾動狀態維持，不應載入 `chatgpt.com/` 覆寫既有對話。
+5. 對照最小回歸：Explore、Rename、一般 pane 切換仍正常。
+6. 只有驗收通過，才另外徵求合併回 main 授權。
