@@ -55,7 +55,6 @@
     <button id="project-new-chat">new</button>
     <button id="project-settings" aria-label="Settings">settings</button>
     <button id="project-settings-missing" aria-label="Settings">settings missing</button>
-    <button id="project-settings-oversized" aria-label="Settings">oversized settings</button>
     <button id="search-control" aria-label="Search chats">search</button>
     <button id="account-menu" aria-haspopup="menu" aria-expanded="false">account</button>
     <button id="plain-dialog-menu" class="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-confirmation-variant="plain-role-dialog">plain</button>
@@ -275,22 +274,6 @@
     document.getElementById("project-settings").addEventListener("click", () => {
       openFixtureOverlayDialog(false);
     });
-    document.getElementById("project-settings-oversized").addEventListener("click", () => {
-      const dialog = document.createElement("div");
-      dialog.id = "fixture-oversized-settings";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      dialog.style.cssText =
-        "position:fixed;inset:0;width:100vw;height:100vh;background:#181818;z-index:9999";
-      dialog.innerHTML = [
-        '<aside style="position:absolute;left:0;top:0;width:250px;height:520px">Settings navigation</aside>',
-        '<main id="fixture-oversized-settings-content" style="position:absolute;left:300px;top:20px;width:500px;height:100px">',
-        '<input aria-label="Setting value">',
-        '<button id="fixture-oversized-settings-close" aria-label="Close">Close</button>',
-        '</main>'
-      ].join("");
-      document.body.appendChild(dialog);
-    });
     document.getElementById("search-control").addEventListener("click", () => {
       openFixtureOverlayDialog(true);
     });
@@ -313,9 +296,6 @@
       }
       if (event.target.id === "project-dialog-close") {
         closeFixtureOverlayDialog();
-      }
-      if (event.target.id === "fixture-oversized-settings-close") {
-        document.getElementById("fixture-oversized-settings")?.remove();
       }
     });
     document.addEventListener("keydown", (event) => {
