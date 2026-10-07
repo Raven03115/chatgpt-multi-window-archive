@@ -94,3 +94,21 @@ test("full-page Settings uses a viewport-sized overlay while preserving existing
     /loadUrlInActivePane\(|completeOverlayWorkspaceSelection\(/
   );
 });
+
+test("Settings return requested through window.open reloads only the sidebar overlay", () => {
+  const start = mainSource.indexOf(
+    "sidebarOverlayWindow.webContents.setWindowOpenHandler"
+  );
+  const end = mainSource.indexOf('"render-process-gone"', start);
+  const handler = mainSource.slice(start, end);
+
+  assert.match(
+    handler,
+    /settingsPageMode && isSettingsReturnRoute\(url\)[\s\S]*?closeSettingsPage\(\);[\s\S]*?sidebarOverlayWindow\.loadURL\(CHATGPT_URL\)/
+  );
+  assert.doesNotMatch(
+    handler,
+    /loadUrlInActivePane\(|completeOverlayWorkspaceSelection\(/
+  );
+});
+
