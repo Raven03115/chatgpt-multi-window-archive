@@ -4,94 +4,90 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const {
-  transitionOverlayState
-} = require("../lib/overlay-policy.cjs");
 
-const root = path.join(__dirname, "..");
-const preloadSource = fs.readFileSync(
-  path.join(root, "sidebar-shape-preload-v4.5.4.js"),
-  "utf8"
-);
 const mainSource = fs.readFileSync(
-  path.join(root, "poc-shaped-sidebar-v4.5.4.js"),
+  path.join(__dirname, "..", "poc-shaped-sidebar-v4.5.4.js"),
+  "utf8"
+);
+const routeSource = fs.readFileSync(
+  path.join(__dirname, "..", "lib", "route-policy.cjs"),
   "utf8"
 );
 
-test("Settings recognizes a visible native modal independently of generic dialog geometry", () => {
+test("profile route is opened in the existing overlay rather than ignored or forwarded", () => {
+  const nativeNavigation = mainSource.slice(
+    mainSource.indexOf("function handleSidebarNavigation"),
+    mainSource.indexOf("function clearOverlayPendingTimer")
+  );
+  const windowOpen = mainSource.slice(
+    mainSource.indexOf("sidebarOverlayWindow.webContents.setWindowOpenHandler"),
+    mainSource.indexOf('sidebarOverlayWindow.webContents.on(\n    "render-process-gone"')
+  );
+
   assert.match(
-    preloadSource,
-    /function hasVisibleNativeSettingsSurface\(\)[\s\S]*?activeOverlayOnlyKind !== "settings"/
+    nativeNavigation,
+    /if \(isSettingsPageUrl\(url\)\)[\s\S]*?openSettingsPage\(url\)/
   );
   assert.match(
-    preloadSource,
-    /settingsSurfacePresent\s*=\s*hasVisibleNativeSettingsSurface\(\)/
+    windowOpen,
+    /if \(isSettingsPageUrl\(url\)\)[\s\S]*?openSettingsPage\(url\)/
   );
   assert.match(
-    preloadSource,
-    /const payload = \{\s*dialogRect,\s*dialogKind,\s*popupRects,\s*settingsSurfacePresent\s*\}/
-  );
-  assert.match(
-    mainSource,
-    /nativeSettingsSurfacePresent\s*&&\s*overlayRuntimeState\.mode === "overlay-intent-pending"/
+    routeSource,
+    /function isSettingsPageUrl\(value\)/
   );
 });
 
-test("explicit Settings pending intent suppresses panes before geometry detection", () => {
-  assert.match(
-    mainSource,
-    /const shouldSuppress =\s*overlayRuntimeState\.suppressPanes \|\|\s*\(\s*overlayOnlyIntentKind === "settings"\s*&&\s*overlayRuntimeState\.mode === "overlay-intent-pending"/
+test("Settings return cannot load the home page into an active pane", () => {
+  const nativeNavigation = mainSource.slice(
+    mainSource.indexOf("function handleSidebarNavigation"),
+    mainSource.indexOf("function clearOverlayPendingTimer")
   );
-
-  let state = transitionOverlayState(
-    { mode: "sidebar-only", generation: 0 },
-    { type: "overlay-intent" }
+  const anchorHandler = mainSource.slice(
+    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-route-intent"'),
+    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-external-route-intent"')
   );
-  assert.equal(state.suppressPanes, false);
-  assert.equal(state.overlayOnlyModal, true);
+  const returnPattern =
+    /if \(settingsPageMode && isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\(\);\s*return;/;
 
-  state = transitionOverlayState(state, { type: "dialog-detected" });
-  assert.equal(state.suppressPanes, true);
-  assert.equal(state.overlayOnlyModal, true);
-
-  state = transitionOverlayState(state, { type: "close" });
-  assert.equal(state.suppressPanes, false);
-  assert.equal(state.overlayOnlyModal, false);
-});
-
-test("Settings main content is exposed only under the explicit Settings CSS class", () => {
-  for (const source of [preloadSource, mainSource]) {
-    assert.match(
-      source,
-      /html\.chatgpt-multi-settings-overlay main,\s*html\.chatgpt-multi-settings-overlay \[role="main"\]/
-    );
-  }
-
-  assert.match(
-    preloadSource,
-    /"chatgpt-sidebar-set-settings-mode"/
-  );
-  assert.match(
-    mainSource,
-    /sendSettingsOverlayClass\(\s*overlayOnlyIntentKind === "settings"/
+  assert.match(nativeNavigation, returnPattern);
+  assert.match(anchorHandler, returnPattern);
+  assert.ok(
+    anchorHandler.indexOf("closeSettingsPage();") <
+      anchorHandler.indexOf("completeOverlayWorkspaceSelection(url)")
   );
 });
 
-test("Settings semantic close restores panes without modifying generic Rename detection", () => {
+test("Settings shape reports cannot dismiss the full-page view", () => {
+  const handler = mainSource.slice(
+    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-shape-state"'),
+    mainSource.indexOf('ipcMain.on(\n  "chatgpt-sidebar-diagnostic-event"')
+  );
   assert.match(
-    mainSource,
-    /function scheduleSettingsSurfaceClose\(\)[\s\S]*?unlockDialogShape\(false\)/
+    handler,
+    /if \(settingsPageMode\)\s*\{\s*return;\s*\}/
   );
   assert.match(
     mainSource,
-    /settingsSurfaceObserved\s*&&\s*overlayOnlyIntentKind === "settings"\s*&&\s*!nativeSettingsSurfacePresent/
+    /function scheduleFullscreenOverlayClose\(\)[\s\S]*?settingsPageMode/
   );
+});
+
+test("full-page Settings uses a viewport-sized overlay while preserving existing pane data", () => {
   assert.match(
-    preloadSource,
-    /overlayDialogObserved\s*&&\s*!dialogRect\s*&&\s*!settingsSurfacePresent/
+    mainSource,
+    /if \(fullscreenOverlayMode \|\| settingsPageMode\)\s*\{\s*shapeRects = \[/
   );
   assert.match(
     mainSource,
-    /const nextDialogRect =\s*sanitizeDialogRect\(\s*state\?\.dialogRect,\s*bounds\s*\)/
+    /function openSettingsPage\(url\)[\s\S]*?type: "settings-page"/
+  );
+  assert.match(
+    mainSource,
+    /function closeSettingsPage\(\)[\s\S]*?type: "close"/
+  );
+  assert.doesNotMatch(
+    mainSource.match(/function closeSettingsPage\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "",
+    /loadUrlInActivePane\(|completeOverlayWorkspaceSelection\(/
   );
 });
