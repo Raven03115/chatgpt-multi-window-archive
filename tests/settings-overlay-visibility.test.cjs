@@ -50,7 +50,10 @@ test("Settings return cannot load the home page into an active pane", () => {
   const returnPattern =
     /if \(settingsPageMode && isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\(\);\s*return;/;
 
-  assert.match(nativeNavigation, returnPattern);
+  assert.match(
+    nativeNavigation,
+    /if \(settingsPageMode\)\s*\{\s*if \(isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\(\);\s*return;/
+  );
   assert.match(anchorHandler, returnPattern);
   assert.ok(
     anchorHandler.indexOf("closeSettingsPage();") <
