@@ -36,6 +36,8 @@ let overlayPendingTimer = null;
 let fullscreenCloseTimer = null;
 let overlayMoveTopCount = 0;
 let fixtureDialogVisible = false;
+let fixtureSettingsSurfaceObserved = false;
+let fixtureSettingsSurfaceCloseTimer = null;
 let fixtureDialogRect = null;
 let fixturePopupRects = [];
 let appliedFixtureShape = [];
@@ -737,6 +739,15 @@ async function run() {
         if (payload?.kind === "settings" || payload?.kind === "search") {
           fixtureOverlayOnlyKind = payload.kind;
         }
+        fixtureSettingsSurfaceObserved = false;
+        if (fixtureSettingsSurfaceCloseTimer) {
+          clearTimeout(fixtureSettingsSurfaceCloseTimer);
+          fixtureSettingsSurfaceCloseTimer = null;
+        }
+        overlayWindow.webContents.send(
+          "chatgpt-sidebar-set-settings-mode",
+          fixtureOverlayOnlyKind === "settings"
+        );
 
         if (fullscreenCloseTimer) {
           clearTimeout(fullscreenCloseTimer);
@@ -759,6 +770,11 @@ async function run() {
             });
             fixtureDialogRect = null;
             fixturePopupRects = [];
+            fixtureOverlayOnlyKind = null;
+            overlayWindow.webContents.send(
+              "chatgpt-sidebar-set-settings-mode",
+              false
+            );
             applyFixtureOverlayShape();
           }, 1500);
         }
@@ -867,6 +883,46 @@ async function run() {
         fixtureDialogVisible = true;
       } else if (
         channel === "chatgpt-sidebar-shape-state" &&
+        fixtureOverlayOnlyKind === "settings" &&
+        payload?.settingsSurfacePresent === true
+      ) {
+        fixtureSettingsSurfaceObserved = true;
+        if (fixtureSettingsSurfaceCloseTimer) {
+          clearTimeout(fixtureSettingsSurfaceCloseTimer);
+          fixtureSettingsSurfaceCloseTimer = null;
+        }
+        if (overlayPendingTimer) {
+          clearTimeout(overlayPendingTimer);
+          overlayPendingTimer = null;
+        }
+        if (overlayState.mode === "overlay-intent-pending") {
+          overlayState = transitionOverlayState(overlayState, {
+            type: "dialog-detected"
+          });
+        }
+        applyFixtureOverlayShape();
+      } else if (
+        channel === "chatgpt-sidebar-shape-state" &&
+        fixtureSettingsSurfaceObserved &&
+        fixtureOverlayOnlyKind === "settings" &&
+        payload?.settingsSurfacePresent === false &&
+        !fixtureSettingsSurfaceCloseTimer
+      ) {
+        fixtureSettingsSurfaceCloseTimer = setTimeout(() => {
+          fixtureSettingsSurfaceCloseTimer = null;
+          fixtureSettingsSurfaceObserved = false;
+          fixtureOverlayOnlyKind = null;
+          overlayState = transitionOverlayState(overlayState, {
+            type: "close"
+          });
+          overlayWindow.webContents.send(
+            "chatgpt-sidebar-set-settings-mode",
+            false
+          );
+          applyFixtureOverlayShape();
+        }, 180);
+      } else if (
+        channel === "chatgpt-sidebar-shape-state" &&
         fixtureDialogVisible
       ) {
         fixtureNativeDialogClosePending = false;
@@ -878,6 +934,11 @@ async function run() {
         applyFixtureOverlayShape();
         fixtureDialogVisible = false;
         fixtureOverlayOnlyKind = null;
+        fixtureSettingsSurfaceObserved = false;
+        overlayWindow.webContents.send(
+          "chatgpt-sidebar-set-settings-mode",
+          false
+        );
         fixtureSettingsEscapeGeneration = null;
         fixtureInjectedEscapeCloseIntentGeneration = null;
       } else if (channel === "chatgpt-sidebar-shape-state") {
@@ -1529,6 +1590,57 @@ async function run() {
     "missing dialog did not return to sidebar-only"
   );
 
+  const oversizedSettingsStart = events.length;
+  await dispatchPointerAndClick("#project-settings-oversized");
+  await waitForEvent((entry) =>
+    events.indexOf(entry) >= oversizedSettingsStart &&
+    entry.channel === "chatgpt-sidebar-shape-state" &&
+    entry.payload?.settingsSurfacePresent === true &&
+    !entry.payload?.dialogRect
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1650));
+  const oversizedVisibility =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        dialogVisible: Boolean(document.getElementById("fixture-oversized-settings")),
+        contentVisible: getComputedStyle(
+          document.getElementById("fixture-oversized-settings-content")
+        ).visibility,
+        settingsClass: document.documentElement.classList.contains(
+          "chatgpt-multi-settings-overlay"
+        )
+      })
+    `);
+  assert(
+    oversizedVisibility.dialogVisible &&
+    oversizedVisibility.contentVisible === "visible" &&
+    oversizedVisibility.settingsClass &&
+    overlayState.mode === "shaped-dialog" &&
+    overlayState.suppressPanes === true &&
+    shapeContainsPoint(appliedFixtureShape, 1100, 700),
+    "oversized Settings dialog is hidden or the overlay timed out"
+  );
+  await dispatchPointerAndClick("#fixture-oversized-settings-close");
+  await new Promise((resolve) => setTimeout(resolve, 320));
+  const oversizedClosed =
+    await overlayWindow.webContents.executeJavaScript(`
+      ({
+        dialogExists: Boolean(document.getElementById("fixture-oversized-settings")),
+        mainVisibility: getComputedStyle(document.getElementById("workspace")).visibility,
+        settingsClass: document.documentElement.classList.contains(
+          "chatgpt-multi-settings-overlay"
+        )
+      })
+    `);
+  assert(
+    !oversizedClosed.dialogExists &&
+    oversizedClosed.mainVisibility === "hidden" &&
+    !oversizedClosed.settingsClass &&
+    overlayState.mode === "sidebar-only" &&
+    !shapeContainsPoint(appliedFixtureShape, 1100, 700),
+    "oversized Settings close did not restore panes or sidebar-only mode"
+  );
+
   await runConfirmationFlow({
     triggerSelector: "#conversation-menu-path",
     minimumWidth: 320,
@@ -1606,6 +1718,10 @@ app.on("will-quit", () => {
   if (fullscreenCloseTimer) {
     clearTimeout(fullscreenCloseTimer);
     fullscreenCloseTimer = null;
+  }
+  if (fixtureSettingsSurfaceCloseTimer) {
+    clearTimeout(fixtureSettingsSurfaceCloseTimer);
+    fixtureSettingsSurfaceCloseTimer = null;
   }
   ipcMain.removeAllListeners();
   if (overlayWindow && !overlayWindow.isDestroyed()) {
