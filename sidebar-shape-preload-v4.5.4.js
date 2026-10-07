@@ -144,6 +144,11 @@ ipcRenderer.on(
       "chatgpt-multi-settings-overlay",
       Boolean(enabled)
     );
+    if (!enabled && activeOverlayOnlyKind === "settings") {
+      activeOverlayOnlyKind = null;
+      overlayDialogObserved = false;
+      settingsOutsidePointerGesture = null;
+    }
     scheduleFrameReport();
   }
 );
@@ -1087,7 +1092,8 @@ function reportShapeState() {
   } else if (
     activeOverlayOnlyKind &&
     overlayDialogObserved &&
-    !dialogRect
+    !dialogRect &&
+    !settingsSurfacePresent
   ) {
     activeOverlayOnlyKind = null;
     overlayDialogObserved = false;
