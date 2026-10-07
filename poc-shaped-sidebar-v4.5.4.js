@@ -2552,6 +2552,12 @@ function setOverlayOnlyUiActive(active, kind = null) {
       overlayRuntimeState.mode ===
       "overlay-intent-pending"
     ) {
+      // A new Settings intent can supersede pending Search without a
+      // fresh overlay state transition.
+      sendSettingsOverlayClass(
+        overlayOnlyIntentKind === "settings"
+      );
+      updatePaneSuppression();
       return;
     }
 
@@ -4389,6 +4395,16 @@ ipcMain.on(
     ) {
       if (nativeDialogClosePending) {
         unlockDialogShape(true);
+      } else if (
+        settingsSurfaceObserved &&
+        overlayOnlyIntentKind === "settings"
+      ) {
+        // Keep Settings while its native root persists, even if its
+        // previous inner rectangle was replaced during tab changes.
+        lockedDialogRect = null;
+        if (!nativeSettingsSurfacePresent) {
+          scheduleSettingsSurfaceClose();
+        }
       } else {
         lockedDialogRect = null;
         applyOverlayRuntimeEvent(
