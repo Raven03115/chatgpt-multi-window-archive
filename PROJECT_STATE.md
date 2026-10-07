@@ -102,7 +102,7 @@
 ## 最近測試證據
 
 - 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
-- 2026-10-08 基於 GitHub 當前 fix branch source 的 V8 隔離檢查：相關 `main`、route policy、overlay policy、新增測試與 fixture 程式語法通過；以 Node API mock 執行 policy 與 static tests 65/65 PASS（後續新增一項 return-window contract 測試仍需重新跑）。
+- 2026-10-08 基於 GitHub 當前 fix branch source 的 V8 隔離檢查：相關 `main`、route policy、overlay policy、新增測試與 fixture 程式語法共 9/9 PASS；以 Node API mock 執行 policy 與 static tests 66/66 PASS。此類 mock 不包含 Electron 実際啟動、視窗合成或真實 DOM。
 - **以上並非 `npm run verify`**。本工具執行環境無法 DNS 解析 github.com 以取得完整可執行 repository，也不能替代 Windows Electron 43.1.0 的實測。
 - 使用者應在 Windows 依下列步驟跑完整 npm run verify；新 fixture 若失敗需先分析 root cause。
 
