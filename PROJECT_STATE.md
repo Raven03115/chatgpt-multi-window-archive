@@ -125,6 +125,14 @@
   - `settings-page-close-source`：區分 `native-home-route`、`native-other-route`、`window-open-home-route`、`anchor-home-route`、`settings-load-failed`、`sidebar-renderer-gone`。
 - 相關 JavaScript 語法檢查已通過；尚未在 Windows 執行完整 `npm run verify`。下一步由上述診斷辨識實際退出來源後，才設計最小、可驗證的正式修復。
 
+### 2026-10-08 診斷補丁後 Settings 契約測試調整
+
+- 使用者 Windows `npm run verify`：**156 tests / 153 pass / 3 fail**，其餘 153 項包含既有 offline Electron fixture 都通過。
+- 全部失敗位於 `tests/settings-overlay-visibility.test.cjs`；前一次只新增「設定退出來源」字串參數，因此舊測試仍要求 `closeSettingsPage()` 無參數和舊版 native return 區塊形式，屬於與程式碼變更不同步的靜態斷言，沒有證據顯示該次 Electron UI 又出現新回歸。
+- 已更新三項契約斷言，要求三個確切來源 `native-home-route`、`anchor-home-route`、`window-open-home-route` 都仍會受控關閉 Settings；同時確認 `closeSettingsPage` 本身呼叫 state close 且沒有載入任何 pane，並確認 return route 的 guard 位於一般 pane forwarding 之前。沒有刪除或跳過任何測試。
+- 更新的 Settings 測試經 V8（mock Node dependencies）**6/6 PASS**、相關三檔 JavaScript 語法檢查通過。**完整 Windows `npm run verify` 仍待重新執行**。
+- 尚未取得含 `settings-page-close-source` / `settings-page-exit-navigation-observed` 的真實 UI 診斷，故「個人檔案」退出的 root cause 仍未知；不得據此宣稱已修復。
+
 ## 最近測試證據
 
 - 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
