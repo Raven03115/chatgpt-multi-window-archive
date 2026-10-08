@@ -99,6 +99,22 @@
 - Rename modal 的黑色背景屬另一個尚未解決的 UI polish，不能與 Settings 問題一起修改。
 - 不應對正式 main 做修改直到此次 fix branch 完整測試與 UI 驗收。
 
+### 2026-10-08 第二次實測後的根因補強
+
+- 使用者 `HEAD 8d88e050adb13077d2906852a3afbaf9d4903d91` 的真實 `npm start`：設定未顯示，主程序執行了 `completing workspace selection: https://chatgpt.com/` 並把首頁載入 pane 1。
+- 新 diagnostics（2026-10-08T00:20:35Z 至 00:21:13Z）確認：
+  - `sidebar-route-handled route=overlay-only` 仍進入 `overlay-intent-pending`，1.5 秒後 `dialog-surface-timeout`。
+  - 在 overlay pending 期間仍發出 `project-action-candidate → project-intent-created`；隨後可出現 `project-intent-consumed route=unknown-workspace` 與 `pane-load-url` / `route-forwarded`，造成不相關的首頁導航。
+  - 診斷中未出現 `settings-page` 模式，說明上一版只辨識 `/profile` 的 full-page route 沒有被觸發。
+- 確認的程式缺陷：
+  - `classifyRoute` 雖把 `/settings` 辨識為 overlay-only，但 `isSettingsPageUrl` 先前只處理 `/profile`，使正式 Settings 網址仍走會逾時的舊 modal 流程。
+  - main process 的 Project/Menu candidate 檢查只看 `overlayOnlyUiActive`、locked dialog 和 fullscreen，未將 `overlayRuntimeState.overlayOnlyModal`（尤其 `overlay-intent-pending`）視為正在開啟的 overlay，允許誤建立 workspace intent。
+- 新候選修正只在修復分支：
+  - 集中於 `lib/route-policy.cjs` 將 `/settings`（及下層網址）與 `/profile` 一起歸類為 `settings-page`，使之持續顯示，且不送入 pane；`/search` 仍維持 overlay-only。
+  - main process 的兩種 native candidate handler 現在在 `overlayRuntimeState.overlayOnlyModal` 或 `settingsPageMode` 時禁止建立任何 workspace intent。
+  - 先補新 regression tests，保留既有 Explore / Search / Rename 對照與窗格恢復驗收；不改 1.5 秒計時器，也不放寬 Electron fixture 安全斷言。
+- 以隔離 V8 與 mocked Node 模組重跑 route/overlay/static tests：**67/67 PASS**（不是 Windows Electron `npm run verify`）。Windows full verify 與真實 Settings UI 仍未重測，不能宣稱完成。
+
 ## 最近測試證據
 
 - 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
@@ -107,7 +123,7 @@
 - 重新比對 main / fix：`tests/fixtures/sidebar-overlay-runner.cjs` 出錯的 `runUpgradeSettingsRace` 與其之前的測試執行順序並未變更；`sidebar-shape-preload-v4.5.4.js` 與 main 完全一致。新 `settings-page` 政策不直接參與該舊測試；目前無充分證據判定是新功能回歸或既有偶發競態。
 - 基於尚不明確的 root cause，沒有改變測試等待、重試或放寬安全斷言，僅在原測試 failure message 補上 state、原生 modal 是否仍存在及最後 16 個 IPC event 類型（不含 URL 或使用者資料），供下一次失敗定位。該診斷修改已經 V8 JS 語法檢查通過。
 - **以上隔離檢查無法取代 `npm run verify`**。本工具執行環境無法 DNS 解析 github.com 以取得完整可執行 repository，也不能替代 Windows Electron 43.1.0 的實測。
-- 使用者應在 Windows 依下列步驟跑完整 npm run verify；新 fixture 若失敗需先分析 root cause。
+- 使用者應在 Windows 依下列步驟跑完整 npm run verify；下一輪特別注意 `settings-page` 是否持續，以及 `Upgrade to Settings shape race` 既有失敗是否重現。
 
 ## 啟動與驗證方式
 
