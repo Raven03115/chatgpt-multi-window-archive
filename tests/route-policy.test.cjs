@@ -370,10 +370,34 @@ test("profile Settings page and nested sections are never workspace routes", () 
   );
 });
 
-test("Settings remains in the overlay", () => {
-  const routeKind = classifyRoute("https://chatgpt.com/settings");
-  assert.equal(routeKind, "overlay-only");
-  assertAction(decide({ routeKind }), "keep-in-overlay");
+test("Settings routes remain in persistent settings-page overlay", () => {
+  for (const url of [
+    "https://chatgpt.com/settings",
+    "https://chatgpt.com/settings/",
+    "https://chatgpt.com/settings/security",
+    "https://chatgpt.com/settings?tab=appearance",
+    "https://chatgpt.com/profile",
+    "https://chatgpt.com/profile/security"
+  ]) {
+    const routeKind = classifyRoute(url);
+    assert.equal(routeKind, "settings-page");
+    assertAction(decide({ routeKind }), "keep-in-overlay");
+    assertAction(decide({
+      routeKind,
+      source: "native-navigation",
+      projectActionIntent: createProjectIntent(),
+      activePaneIndex: 2,
+      currentProjectIntentGeneration: 7,
+      now: TEST_NOW
+    }), "keep-in-overlay");
+  }
+  for (const url of [
+    "https://chatgpt.com/settings-extra",
+    "https://chatgpt.com/profiles",
+    "https://example.com/settings"
+  ]) {
+    assert.notEqual(classifyRoute(url), "settings-page");
+  }
 });
 
 test("Search remains in the overlay", () => {
