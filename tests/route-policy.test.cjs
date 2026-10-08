@@ -10,6 +10,7 @@ const {
   decideMenuRouteCandidate,
   decideProjectActionCandidate,
   decideSidebarRouting,
+  decideSettingsPageNavigation,
   isMenuRouteIntentValid,
   isProjectActionIntentValid
 } = require("../lib/route-policy.cjs");
@@ -367,6 +368,40 @@ test("profile Settings page and nested sections are never workspace routes", () 
   assert.equal(
     classifyRoute("https://chatgpt.com/profiles"),
     "unknown-workspace"
+  );
+});
+
+test("Settings section navigation never exits to panes without the app return route", () => {
+  const settingsDestinations = [
+    "https://chatgpt.com/profile",
+    "https://chatgpt.com/settings",
+    "https://chatgpt.com/profile/security",
+    "https://chatgpt.com/library",
+    "https://chatgpt.com/account",
+    "https://chatgpt.com/c/sample-conversation",
+    "https://chatgpt.com/g/g-p-sample/project",
+    "https://chatgpt.com/search",
+    "https://chatgpt.com/upgrade"
+  ];
+
+  for (const url of settingsDestinations) {
+    const decision = decideSettingsPageNavigation(url);
+    assert.equal(decision.action, "stay-in-settings", url);
+  }
+
+  for (const url of [
+    "https://chatgpt.com/",
+    "https://chatgpt.com/?source=profile"
+  ]) {
+    assert.equal(
+      decideSettingsPageNavigation(url).action,
+      "return-to-app"
+    );
+  }
+
+  assert.equal(
+    decideSettingsPageNavigation("https://example.com/").action,
+    "stay-in-settings"
   );
 });
 
