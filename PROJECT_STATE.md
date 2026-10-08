@@ -103,7 +103,10 @@
 
 - 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
 - 2026-10-08 基於 GitHub 當前 fix branch source 的 V8 隔離檢查：相關 `main`、route policy、overlay policy、新增測試與 fixture 程式語法共 9/9 PASS；以 Node API mock 執行 policy 與 static tests 66/66 PASS。此類 mock 不包含 Electron 実際啟動、視窗合成或真實 DOM。
-- **以上並非 `npm run verify`**。本工具執行環境無法 DNS 解析 github.com 以取得完整可執行 repository，也不能替代 Windows Electron 43.1.0 的實測。
+- 2026-10-08 使用者 Windows `npm run verify`：共 155 tests，154 pass、1 fail，唯一失敗為既有 offline Electron fixture 中 `Upgrade to Settings shape race at delay=0ms`；右側 backdrop 點擊穿透至 pane（`overlayShapeHit=false, paneClicks=1`），故完整 verify **未通過**，不可合併 main。
+- 重新比對 main / fix：`tests/fixtures/sidebar-overlay-runner.cjs` 出錯的 `runUpgradeSettingsRace` 與其之前的測試執行順序並未變更；`sidebar-shape-preload-v4.5.4.js` 與 main 完全一致。新 `settings-page` 政策不直接參與該舊測試；目前無充分證據判定是新功能回歸或既有偶發競態。
+- 基於尚不明確的 root cause，沒有改變測試等待、重試或放寬安全斷言，僅在原測試 failure message 補上 state、原生 modal 是否仍存在及最後 16 個 IPC event 類型（不含 URL 或使用者資料），供下一次失敗定位。該診斷修改已經 V8 JS 語法檢查通過。
+- **以上隔離檢查無法取代 `npm run verify`**。本工具執行環境無法 DNS 解析 github.com 以取得完整可執行 repository，也不能替代 Windows Electron 43.1.0 的實測。
 - 使用者應在 Windows 依下列步驟跑完整 npm run verify；新 fixture 若失敗需先分析 root cause。
 
 ## 啟動與驗證方式
