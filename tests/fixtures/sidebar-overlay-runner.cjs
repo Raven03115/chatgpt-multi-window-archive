@@ -486,6 +486,36 @@ async function runUpgradeSettingsRace(delayMs) {
     await dispatchWorkspacePointerSequence(1100, 700);
   const settingsState =
     await getFixtureSettingsGestureState();
+  const raceEventTrace = events
+    .slice(settingsStart)
+    .filter((entry) => [
+      "chatgpt-sidebar-shape-state",
+      "chatgpt-sidebar-dialog-close-intent",
+      "chatgpt-sidebar-fullscreen-overlay-intent",
+      "chatgpt-sidebar-overlay-only-intent",
+      "fixture-dialog-close-handling"
+    ].includes(entry.channel))
+    .slice(-16)
+    .map((entry) => {
+      if (entry.channel === "chatgpt-sidebar-shape-state") {
+        return "shape:" + (
+          entry.payload?.dialogRect ? "dialog" : "no-dialog"
+        ) + ":popup=" + (
+          entry.payload?.popupRects?.length ?? 0
+        );
+      }
+      if (entry.channel === "chatgpt-sidebar-fullscreen-overlay-intent") {
+        return "fullscreen:" + String(entry.payload);
+      }
+      if (entry.channel === "chatgpt-sidebar-overlay-only-intent") {
+        return "overlay:" + String(entry.payload?.kind);
+      }
+      if (entry.channel === "fixture-dialog-close-handling") {
+        return "close-handling:" + String(entry.payload?.mode);
+      }
+      return "dialog-close-intent";
+    })
+    .join(",");
   assert(
     backdropResult.overlayShapeHit === true &&
       ["html", "document-body", "transparent-root"].includes(
@@ -506,7 +536,14 @@ async function runUpgradeSettingsRace(delayMs) {
       `escapeDown=${backdropResult.escapeKeyDownCount} ` +
       `escapeUp=${backdropResult.escapeKeyUpCount} ` +
       `backdropClicks=${backdropResult.backdropClickCount} ` +
-      `paneClicks=${backdropResult.paneClickCount}`
+      `paneClicks=${backdropResult.paneClickCount} ` +
+      `mode=${overlayState.mode} ` +
+      `dialogExists=${settingsState.dialogExists} ` +
+      `fixtureDialogVisible=${fixtureDialogVisible} ` +
+      `nativeClosePending=${fixtureNativeDialogClosePending} ` +
+      `fullscreenCloseTimer=${Boolean(fullscreenCloseTimer)} ` +
+      `pendingTimer=${Boolean(overlayPendingTimer)} ` +
+      `trace=[${raceEventTrace}]`
   );
   await dispatchPointerAndClick("#project-dialog-close");
   await waitForEvent((entry) =>
