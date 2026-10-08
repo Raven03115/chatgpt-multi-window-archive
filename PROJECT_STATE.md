@@ -115,6 +115,16 @@
   - 先補新 regression tests，保留既有 Explore / Search / Rename 對照與窗格恢復驗收；不改 1.5 秒計時器，也不放寬 Electron fixture 安全斷言。
 - 以隔離 V8 與 mocked Node 模組重跑 route/overlay/static tests：**67/67 PASS**（不是 Windows Electron `npm run verify`）。Windows full verify 與真實 Settings UI 仍未重測，不能宣稱完成。
 
+### 2026-10-08「個人檔案」切換造成 Settings 提前退出（診斷中）
+
+- 使用者確認設定主畫面已可正常顯示；但點擊設定內「個人檔案」後，應用程式提前回到聊天室，未完成完整設定流程驗收。
+- 使用者提供的診斷重複顯示 `settings-page-navigation` 後，幾秒鐘出現 `settings-page-return`。證明主程序執行了設定退出，而非單純 z-order 遮蔽；但原始紀錄沒有記錄導致退出的目的地或事件來源，**尚未證實**「個人檔案」究竟觸發首頁導頁、未辨識的設定子路由、被攔截的新視窗、載入錯誤或 renderer failure。
+- 已重新比對工作分支原始碼：`handleSidebarNavigation()` 會在 `settingsPageMode` 中對任何非 `/settings`／`/profile` 導頁呼叫 `closeSettingsPage()`；`isSettingsReturnRoute()` 只以 pathname `/` 判定，未要求明確的「返回應用程式」意圖，確實有過度寬鬆的退出條件。
+- 因多輪失敗已達重新診斷停損條件，**目前不更動導航或退出行為**。只在 `poc-shaped-sidebar-v4.5.4.js` 的既有退出呼叫點加入隱私安全的診斷：
+  - `settings-page-exit-navigation-observed`：以 `routeKind`、`did-navigate`／`did-navigate-in-page`、`home-route`／`unrecognized-settings-destination` 描述非 Settings 導頁；不記錄 URL。
+  - `settings-page-close-source`：區分 `native-home-route`、`native-other-route`、`window-open-home-route`、`anchor-home-route`、`settings-load-failed`、`sidebar-renderer-gone`。
+- 相關 JavaScript 語法檢查已通過；尚未在 Windows 執行完整 `npm run verify`。下一步由上述診斷辨識實際退出來源後，才設計最小、可驗證的正式修復。
+
 ## 最近測試證據
 
 - 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
