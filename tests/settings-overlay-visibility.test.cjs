@@ -47,17 +47,24 @@ test("Settings return cannot load the home page into an active pane", () => {
     mainSource.indexOf('"chatgpt-sidebar-route-intent"'),
     mainSource.indexOf('"chatgpt-sidebar-external-route-intent"')
   );
-  const returnPattern =
-    /if \(settingsPageMode && isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\(\);\s*return;/;
-
   assert.match(
     nativeNavigation,
-    /if \(settingsPageMode\)\s*\{\s*if \(isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\(\);\s*return;/
+    /if \(settingsPageMode\)\s*\{\s*const isHomeRoute = isSettingsReturnRoute\(url\);[\s\S]*?if \(isHomeRoute\)\s*\{\s*closeSettingsPage\("native-home-route"\);\s*return;/
   );
-  assert.match(anchorHandler, returnPattern);
+  assert.match(
+    anchorHandler,
+    /if \(settingsPageMode && isSettingsReturnRoute\(url\)\)\s*\{\s*closeSettingsPage\("anchor-home-route"\);\s*return;/
+  );
+  const returnIndex = anchorHandler.indexOf(
+    'closeSettingsPage("anchor-home-route");'
+  );
+  const forwardingIndex = anchorHandler.indexOf(
+    "completeOverlayWorkspaceSelection(url)"
+  );
   assert.ok(
-    anchorHandler.indexOf("closeSettingsPage();") <
-      anchorHandler.indexOf("completeOverlayWorkspaceSelection(url)")
+    returnIndex >= 0 &&
+      forwardingIndex > returnIndex,
+    "Settings return must close the overlay before any pane forwarding"
   );
 });
 
@@ -85,12 +92,24 @@ test("full-page Settings uses a viewport-sized overlay while preserving existing
     mainSource,
     /function openSettingsPage\(url\)[\s\S]*?type: "settings-page"/
   );
+  const closeStart = mainSource.indexOf(
+    'function closeSettingsPage(closeSource = "unspecified")'
+  );
+  const closeEnd = mainSource.indexOf(
+    "\nfunction openFullscreenAccountRoute(",
+    closeStart
+  );
+  assert.ok(
+    closeStart >= 0 && closeEnd > closeStart,
+    "Settings close function must remain independently identifiable"
+  );
+  const closeBody = mainSource.slice(closeStart, closeEnd);
   assert.match(
-    mainSource,
-    /function closeSettingsPage\(\)[\s\S]*?type: "close"/
+    closeBody,
+    /applyOverlayRuntimeEvent\(\s*\{ type: "close" \}/
   );
   assert.doesNotMatch(
-    mainSource.match(/function closeSettingsPage\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "",
+    closeBody,
     /loadUrlInActivePane\(|completeOverlayWorkspaceSelection\(/
   );
 });
@@ -104,7 +123,7 @@ test("Settings return requested through window.open reloads only the sidebar ove
 
   assert.match(
     handler,
-    /settingsPageMode && isSettingsReturnRoute\(url\)[\s\S]*?closeSettingsPage\(\);[\s\S]*?sidebarOverlayWindow\.loadURL\(CHATGPT_URL\)/
+    /settingsPageMode && isSettingsReturnRoute\(url\)[\s\S]*?closeSettingsPage\("window-open-home-route"\);[\s\S]*?sidebarOverlayWindow\.loadURL\(CHATGPT_URL\)/
   );
   assert.doesNotMatch(
     handler,
