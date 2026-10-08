@@ -2213,7 +2213,7 @@ function shouldSuppressSidebarRouteForwarding() {
   );
 }
 
-function handleSidebarNavigation(url) {
+function handleSidebarNavigation(url, navigationSource = "native-navigation") {
   if (!sidebarInitialLoadComplete) {
     return;
   }
@@ -2224,14 +2224,25 @@ function handleSidebarNavigation(url) {
   }
 
   if (settingsPageMode) {
-    if (isSettingsReturnRoute(url)) {
-      closeSettingsPage();
+    const isHomeRoute = isSettingsReturnRoute(url);
+    recordIntegrationEvent({
+      event: "settings-page-exit-navigation-observed",
+      routeKind: getDiagnosticRouteKind(url),
+      source: navigationSource,
+      action: "observed",
+      reason: isHomeRoute
+        ? "home-route"
+        : "unrecognized-settings-destination"
+    });
+
+    if (isHomeRoute) {
+      closeSettingsPage("native-home-route");
       return;
     }
 
-    // Leaving Settings for a different route restores the pane
-    // layout; existing route forwarding rules still apply.
-    closeSettingsPage();
+    // This existing exit behavior remains unchanged in the
+    // diagnostic build. The event above identifies its source.
+    closeSettingsPage("native-other-route");
   }
 
   if (isExternalAccountRouteUrl(url)) {
@@ -2672,16 +2683,23 @@ function openSettingsPage(url) {
         error.message
       );
       if (settingsPageMode) {
-        closeSettingsPage();
+        closeSettingsPage("settings-load-failed");
       }
     });
   }
 }
 
-function closeSettingsPage() {
+function closeSettingsPage(closeSource = "unspecified") {
   if (!settingsPageMode) {
     return;
   }
+
+  recordIntegrationEvent({
+    event: "settings-page-close-source",
+    source: "settings-page",
+    action: "close-requested",
+    reason: closeSource
+  });
 
   clearProjectActionIntent("settings-page-return");
   clearMenuRouteIntent("settings-page-return");
@@ -3939,7 +3957,7 @@ function createSidebarOverlayWindow() {
   sidebarOverlayWindow.webContents.on(
     "did-navigate",
     (_event, url) => {
-      handleSidebarNavigation(url);
+      handleSidebarNavigation(url, "did-navigate");
     }
   );
 
@@ -3947,7 +3965,7 @@ function createSidebarOverlayWindow() {
     "did-navigate-in-page",
     (_event, url, isMainFrame) => {
       if (isMainFrame) {
-        handleSidebarNavigation(url);
+        handleSidebarNavigation(url, "did-navigate-in-page");
       }
     }
   );
@@ -3957,7 +3975,7 @@ function createSidebarOverlayWindow() {
       if (settingsPageMode && isSettingsReturnRoute(url)) {
         // The official return action may request a new window. Keep
         // the existing overlay and restore the existing pane sessions.
-        closeSettingsPage();
+        closeSettingsPage("window-open-home-route");
         sidebarOverlayWindow.loadURL(CHATGPT_URL).catch(
           (error) => {
             console.error(
@@ -4001,7 +4019,7 @@ function createSidebarOverlayWindow() {
     (_event, details) => {
       clearProjectActionIntent("sidebar-renderer-gone");
       if (settingsPageMode) {
-        closeSettingsPage();
+        closeSettingsPage("sidebar-renderer-gone");
       }
 
       recordIntegrationEvent({
@@ -4700,7 +4718,7 @@ ipcMain.on(
     }
 
     if (settingsPageMode && isSettingsReturnRoute(url)) {
-      closeSettingsPage();
+      closeSettingsPage("anchor-home-route");
       return;
     }
 
