@@ -49,7 +49,7 @@ test("Settings return cannot load the home page into an active pane", () => {
   );
   assert.match(
     nativeNavigation,
-    /if \(settingsPageMode\)\s*\{\s*const isHomeRoute = isSettingsReturnRoute\(url\);[\s\S]*?if \(isHomeRoute\)\s*\{\s*closeSettingsPage\("native-home-route"\);\s*return;/
+    /if \(settingsPageMode\)\s*\{\s*const settingsDecision =\s*decideSettingsPageNavigation\(url\);[\s\S]*?if \(settingsDecision\.action === "return-to-app"\)\s*\{\s*closeSettingsPage\("native-home-route"\);\s*\}[\s\S]*?return;/
   );
   assert.match(
     anchorHandler,
