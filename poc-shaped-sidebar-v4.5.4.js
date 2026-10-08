@@ -4499,9 +4499,11 @@ ipcMain.on(
     }
 
     const overlayState =
+      overlayRuntimeState.overlayOnlyModal ||
       overlayOnlyUiActive ||
       Boolean(lockedDialogRect) ||
-      fullscreenOverlayMode
+      fullscreenOverlayMode ||
+      settingsPageMode
         ? "dialog"
         : candidate?.overlayState;
     const decision = decideMenuRouteCandidate({
@@ -4546,9 +4548,11 @@ ipcMain.on(
     }
 
     const overlayState =
+      overlayRuntimeState.overlayOnlyModal ||
       overlayOnlyUiActive ||
       Boolean(lockedDialogRect) ||
-      fullscreenOverlayMode
+      fullscreenOverlayMode ||
+      settingsPageMode
         ? "dialog"
         : candidate?.overlayState;
     const classifiedControl = classifyOverlayControl({
