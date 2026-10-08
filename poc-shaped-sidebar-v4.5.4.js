@@ -18,6 +18,7 @@ const {
   classifyRoute,
   isSettingsPageUrl,
   isSettingsReturnRoute,
+  decideSettingsPageNavigation,
   decideMenuRouteCandidate,
   decideProjectActionCandidate,
   decideSidebarRouting
@@ -2224,25 +2225,25 @@ function handleSidebarNavigation(url, navigationSource = "native-navigation") {
   }
 
   if (settingsPageMode) {
-    const isHomeRoute = isSettingsReturnRoute(url);
+    const settingsDecision =
+      decideSettingsPageNavigation(url);
+
     recordIntegrationEvent({
-      event: "settings-page-exit-navigation-observed",
+      event: "settings-page-navigation-observed",
       routeKind: getDiagnosticRouteKind(url),
       source: navigationSource,
-      action: "observed",
-      reason: isHomeRoute
-        ? "home-route"
-        : "unrecognized-settings-destination"
+      action: settingsDecision.action,
+      reason: settingsDecision.reason
     });
 
-    if (isHomeRoute) {
+    if (settingsDecision.action === "return-to-app") {
       closeSettingsPage("native-home-route");
-      return;
     }
 
-    // This existing exit behavior remains unchanged in the
-    // diagnostic build. The event above identifies its source.
-    closeSettingsPage("native-other-route");
+    // Settings owns all other native navigations, even if ChatGPT
+    // introduces a previously unknown route for a Settings section.
+    // Never pass those navigations to workspace/pane forwarding.
+    return;
   }
 
   if (isExternalAccountRouteUrl(url)) {
