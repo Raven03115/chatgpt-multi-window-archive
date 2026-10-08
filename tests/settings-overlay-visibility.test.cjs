@@ -68,6 +68,43 @@ test("Settings return cannot load the home page into an active pane", () => {
   );
 });
 
+test("unrecognized native Settings destination stays in overlay and cannot route to a pane", () => {
+  const nativeNavigation = mainSource.slice(
+    mainSource.indexOf("function handleSidebarNavigation"),
+    mainSource.indexOf("function clearOverlayPendingTimer")
+  );
+  const settingsGuardStart = nativeNavigation.indexOf(
+    "if (settingsPageMode)"
+  );
+  const workspaceForwardingStart = nativeNavigation.indexOf(
+    "if (isWorkspaceRouteUrl(url))"
+  );
+  assert.ok(
+    settingsGuardStart >= 0 &&
+      workspaceForwardingStart > settingsGuardStart
+  );
+  const guardedNavigation = nativeNavigation.slice(
+    settingsGuardStart,
+    workspaceForwardingStart
+  );
+  assert.match(
+    guardedNavigation,
+    /decideSettingsPageNavigation\(url\)/
+  );
+  assert.match(
+    guardedNavigation,
+    /if \(settingsDecision\.action === "return-to-app"\)[\s\S]*?closeSettingsPage\("native-home-route"\);[\s\S]*?return;/
+  );
+  assert.doesNotMatch(
+    guardedNavigation,
+    /closeSettingsPage\("native-other-route"\)/
+  );
+  assert.match(
+    guardedNavigation,
+    /return;\s*\}/
+  );
+});
+
 test("Settings shape reports cannot dismiss the full-page view", () => {
   const handler = mainSource.slice(
     mainSource.indexOf('"chatgpt-sidebar-shape-state"'),
