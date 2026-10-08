@@ -133,6 +133,16 @@
 - 更新的 Settings 測試經 V8（mock Node dependencies）**6/6 PASS**、相關三檔 JavaScript 語法檢查通過。**完整 Windows `npm run verify` 仍待重新執行**。
 - 尚未取得含 `settings-page-close-source` / `settings-page-exit-navigation-observed` 的真實 UI 診斷，故「個人檔案」退出的 root cause 仍未知；不得據此宣稱已修復。
 
+### 2026-10-08 個人檔案誤退出的確認根因與候選修正
+
+- 使用者已確認「設定」主畫面正常顯示，但點選「個人檔案」時回到聊天室；新增安全診斷精確回報 `settings-page-exit-navigation-observed route=unknown-workspace reason=unrecognized-settings-destination`，緊接 `settings-page-close-source reason=native-other-route`。
+- 已確認 root cause 位於 `handleSidebarNavigation()`：Settings full-page 模式遇到非 `/settings`、`/profile` 的 native same-page route 時，主動執行 `closeSettingsPage("native-other-route")`。這不是 pane z-order、尺寸偵測或計時器問題；此路由亦不可推測為具體固定 URL，因診斷刻意不保留完整目的地。
+- 正式修正只針對設定離開條件：`lib/route-policy.cjs` 集中新增 `decideSettingsPageNavigation()`，正式 ChatGPT 首頁 `https://chatgpt.com/` 才是 `return-to-app`；其他 Settings 內產生的原生導航為 `stay-in-settings`，不論先前是否認得其子路由。
+- `poc-shaped-sidebar-v4.5.4.js` 的 Settings native navigation 現在依該 policy 判定，非返回路由會維持 full-page Settings 並直接 return，不往下進 Project/Pane forwarding；只有 app home route 才執行 `closeSettingsPage("native-home-route")`。沒有變更搜尋、探索、Rename、一般 pane 導航流程。
+- 修正前先建立兩項 regression tests，覆蓋未知 Settings 子頁不退出、不轉送 pane，與正式返回仍需正確關閉；再修改實作並同步既有 source-contract test。
+- 已完成獨立 V8 語法檢查 **8/8 PASS**，以及隔離 Node mock 執行的 route/overlay/static contract tests **69/69 PASS**。此結果**不是** `npm run verify`：容器無法解析 github.com，沒有現行完整 repo 或 Windows Electron 圖形環境。
+- 尚須在使用者 Windows `npm run verify` 全數通過，且人工驗收「設定 → 個人檔案 → 設定仍可見與操作 → 返回應用程式 → 原三個 pane 不重載」。未驗收前不能宣稱已完成。
+
 ## 最近測試證據
 
 - 2026-10-08 使用者重現前一 candidate failure：畫面初始可見，幾秒後 pane 再次覆蓋；原生記錄出現 /profile 的 ignored window route。
