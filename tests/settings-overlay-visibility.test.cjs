@@ -112,3 +112,36 @@ test("Settings return requested through window.open reloads only the sidebar ove
   );
 });
 
+
+test("pending Settings and Search overlay never issue workspace navigation intents", () => {
+  const mainCandidateStart = mainSource.indexOf(
+    '"chatgpt-sidebar-project-action-candidate"'
+  );
+  const mainCandidateEnd = mainSource.indexOf(
+    '"chatgpt-sidebar-dialog-close-intent"',
+    mainCandidateStart
+  );
+  const projectCandidateHandler = mainSource.slice(
+    mainCandidateStart,
+    mainCandidateEnd
+  );
+  const menuCandidateStart = mainSource.indexOf(
+    '"chatgpt-sidebar-menu-route-candidate"'
+  );
+  const menuCandidateHandler = mainSource.slice(
+    menuCandidateStart,
+    mainCandidateStart
+  );
+
+  assert.ok(mainCandidateStart >= 0 && mainCandidateEnd > mainCandidateStart);
+  assert.ok(menuCandidateStart >= 0 && menuCandidateStart < mainCandidateStart);
+  assert.match(
+    projectCandidateHandler,
+    /overlayRuntimeState\.overlayOnlyModal/
+  );
+  assert.match(
+    menuCandidateHandler,
+    /overlayRuntimeState\.overlayOnlyModal/
+  );
+});
+
